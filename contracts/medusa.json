@@ -1,0 +1,64 @@
+{
+  "fuzzing": {
+    "workers": 8,
+    "timeout": 600,
+    "testLimit": 0,
+    "callSequenceLength": 80,
+    "corpusDirectory": "medusa-corpus",
+    "coverageEnabled": true,
+    "targetContracts": [
+      "MedusaHarness"
+    ],
+    "targetContractsBalances": [],
+    "deployerAddress": "0x30000",
+    "senderAddresses": [
+      "0x10000",
+      "0x20000"
+    ],
+    "blockNumberDelayMax": 60480,
+    "blockTimestampDelayMax": 604800,
+    "transactionGasLimit": 30000000,
+    "blockGasLimit": 125000000,
+    "testing": {
+      "stopOnFailedTest": true,
+      "testAllContracts": false,
+      "assertionTesting": {
+        "enabled": false
+      },
+      "propertyTesting": {
+        "enabled": true,
+        "testPrefixes": [
+          "property_"
+        ]
+      },
+      "optimizationTesting": {
+        "enabled": false
+      }
+    },
+    "chainConfig": {
+      "codeSizeCheckDisabled": true,
+      "cheatCodes": {
+        "cheatCodesEnabled": true,
+        "enableFFI": false
+      }
+    }
+  },
+  "compilation": {
+    "platform": "crytic-compile",
+    "platformConfig": {
+      "target": ".",
+      "solcVersion": "",
+      "exportDirectory": "",
+      "args": [
+        "--foundry-compile-all",
+        "--foundry-out-directory",
+        "out-medusa"
+      ]
+    }
+  },
+  "logging": {
+    "level": "info",
+    "logDirectory": "",
+    "noColor": true
+  }
+}

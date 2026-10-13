@@ -1,0 +1,63 @@
+[profile.default]
+src = "src"
+out = "out"
+libs = ["lib"]
+test = "test"
+script = "script"
+solc = "0.8.37"
+evm_version = "cancun"
+optimizer = true
+optimizer_runs = 1_000_000
+via_ir = false
+bytecode_hash = "none"
+fs_permissions = [{ access = "read", path = "./out" }, { access = "read-write", path = "../deployments" }]
+
+# The vault is not gas-critical and its factory embeds its init code: compile both for size.
+additional_compiler_profiles = [{ name = "size", optimizer_runs = 200 }]
+compilation_restrictions = [
+    { paths = "src/periphery/Vault.sol", optimizer_runs = 200 },
+    { paths = "src/periphery/VaultFactory.sol", optimizer_runs = 200 },
+]
+
+[fuzz]
+runs = 2000
+# Fixed seed keeps `forge snapshot --check` reproducible; nightly CI overrides it for fresh inputs.
+seed = "0xc0f1"
+
+[invariant]
+runs = 256
+depth = 64
+fail_on_revert = false
+
+[fmt]
+line_length = 120
+tab_width = 4
+bracket_spacing = false
+int_types = "long"
+number_underscore = "thousands"
+
+# Per-chain profiles. WINDOW_BLOCKS and GridConfig are deploy parameters read by script/Deploy.s.sol;
+# the values here only document the intended RPC endpoints.
+[profile.monad]
+eth_rpc_url = "https://testnet-rpc.monad.xyz"
+
+[profile.hyperevm]
+eth_rpc_url = "https://rpc.hyperliquid-testnet.xyz/evm"
+
+[rpc_endpoints]
+monad_testnet = "https://testnet-rpc.monad.xyz"
+monad = "https://rpc.monad.xyz"
+hyperevm_testnet = "https://rpc.hyperliquid-testnet.xyz/evm"
+hyperevm = "https://rpc.hyperliquid.xyz/evm"
+
+[lint]
+# Reviewed: remaining narrowing casts are bounded by values that were range-checked when escrowed.
+exclude_lints = ["unsafe-typecast", "uninitialized-local", "require-revert-in-loop"]
+
+# Halmos cannot parse the duplicate artifacts that multiple compiler profiles produce; give it a plain build.
+[profile.halmos]
+out = "out-halmos"
+cache_path = "cache-halmos"
+test = "test/halmos"
+additional_compiler_profiles = []
+compilation_restrictions = []
