@@ -1,0 +1,54 @@
+name: offchain
+
+on:
+  pull_request:
+    paths: ["apps/**", "services/**", "packages/**", "deployments/**", "scripts/**", "contracts/script/**", ".github/workflows/web.yml"]
+  push:
+    branches: [main]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          submodules: recursive
+      - uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: v1.8.5
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: contracts artifacts for codegen
+        run: cd contracts && forge build
+      - run: pnpm --filter @confluere/sdk codegen
+      - run: pnpm --filter @confluere/sdk build
+      - run: pnpm -r typecheck
+      - run: pnpm -r test   # web: jsdom render tests; chain-backed tests skip without anvil
+      - run: pnpm --filter web build
+        env:
+          NEXT_TELEMETRY_DISABLED: "1"
+
+  e2e:
+    # fresh anvil: deploy, four cycles, graduation, vault fill, bootstrap MM (and its exit), seat slash by the keeper,
+    # long-tail pool
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          submodules: recursive
+      - uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: v1.8.5
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: cd contracts && forge build
+      - run: bash scripts/e2e-anvil.sh

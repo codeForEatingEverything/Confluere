@@ -1,0 +1,88 @@
+name: contracts
+
+on:
+  pull_request:
+    paths: ["contracts/**", "scripts/**", ".github/workflows/contracts.yml"]
+  push:
+    branches: [main]
+  schedule:
+    - cron: "0 3 * * *" # nightly deep runs
+
+defaults:
+  run:
+    working-directory: contracts
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          submodules: recursive
+      - uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: v1.8.5
+      - name: fmt
+        run: forge fmt --check
+      - name: build (fails above 24 KB)
+        run: forge build --sizes
+      - name: test (unit + fuzz + invariant)
+        run: forge test
+      - name: gas regression
+        run: forge snapshot --check --no-match-path 'test/invariant/*'
+      - name: deploy scripts (guards, idempotent re-runs; in-memory, nothing is sent)
+        run: forge script script/checks/ScriptChecks.s.sol
+      - name: shell scripts parse
+        run: for f in ../scripts/*.sh ../scripts/lib/*.sh ../scripts/test/*.sh; do bash -n "$f"; done
+      - name: testnet deploy / roll scripts (offline, fake cast/forge/pnpm; GNU coreutils here)
+        run: bash ../scripts/test/testnet-lib.test.sh
+      - name: testnet graduation rows below one seed's volume (in-memory)
+        run: bash ../scripts/test/grad-seed.test.sh
+      - name: e2e refuses a busy 8545 and times out waiting for its anvil
+        run: bash ../scripts/test/e2e-guard.test.sh
+
+  static:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          submodules: recursive
+      - uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: v1.8.5
+      - uses: astral-sh/setup-uv@v6
+      - name: slither (fail on medium)
+        run: uvx --from slither-analyzer slither . --fail-medium
+      - name: aderyn
+        run: |
+          curl -sSL -o /tmp/a.tar.xz https://github.com/Cyfrin/aderyn/releases/download/aderyn-v0.6.8/aderyn-x86_64-unknown-linux-gnu.tar.xz
+          mkdir -p /tmp/aderyn && tar -xJf /tmp/a.tar.xz -C /tmp/aderyn
+          "$(find /tmp/aderyn -name aderyn -type f)" . --src src -x mocks -o aderyn-report.md
+      - uses: actions/upload-artifact@v4
+        with:
+          name: aderyn-report
+          path: contracts/aderyn-report.md
+
+  nightly:
+    if: github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          submodules: recursive
+      - uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: v1.8.5
+      - uses: astral-sh/setup-uv@v6
+      - name: deep invariants
+        run: FOUNDRY_INVARIANT_RUNS=2000 FOUNDRY_INVARIANT_DEPTH=256 forge test --match-path 'test/invariant/*'
+      - name: halmos
+        run: FOUNDRY_PROFILE=halmos uvx halmos --forge-build-out out-halmos --function check_
+      - name: z3 arithmetic lemmas
+        run: uv run --with z3-solver==4.12.6.0 python test/smt/lemmas.py
+      - name: medusa (30 min, coverage-guided)
+        run: |
+          uv tool install slither-analyzer   # provides crytic-compile
+          curl -sSL -o /tmp/medusa.tar.gz https://github.com/crytic/medusa/releases/download/v1.5.1/medusa-linux-x64.tar.gz
+          tar -xzf /tmp/medusa.tar.gz -C /tmp
+          FOUNDRY_OUT=out-medusa /tmp/medusa fuzz --config medusa.json --timeout 1800
