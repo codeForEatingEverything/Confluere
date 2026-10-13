@@ -7,7 +7,7 @@
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { useState } from "react";
-import { Settings2 } from "lucide-react";
+import { Play, Settings2 } from "lucide-react";
 import { Card } from "../ui";
 import { BorrowSwap } from "./BorrowSwap";
 import { RepaySwap } from "./RepaySwap";
@@ -55,11 +55,12 @@ export function HomeScreen() {
               </Link>
             </p>
             {!demo && (
-              <div className="mt-5 flex flex-wrap items-center gap-3">
-                <Link href="/developers/demo" className="btn btn-md btn-secondary" data-testid="home-demo">
+              <div className="mt-6 flex flex-wrap items-center gap-x-4 gap-y-2">
+                <Link href="/developers/demo" className="btn btn-lg btn-primary gap-2 px-6 text-body font-semibold" data-testid="home-demo">
+                  <Play size={16} strokeWidth={2.25} fill="currentColor" aria-hidden />
                   Try the demo
                 </Link>
-                <span className="text-caption text-ink-3">The same app on sample data: sign a message, see it fill.</span>
+                <span className="max-w-[26ch] text-caption leading-5 text-ink-3">The same app on sample data. Sign a message, watch it fill.</span>
               </div>
             )}
           </div>
