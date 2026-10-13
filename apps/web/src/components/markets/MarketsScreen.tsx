@@ -57,9 +57,9 @@ export function MarketsScreen() {
   const offers = useBestOffers(useMemo(() => all.filter((p) => p.status !== Status.Closed).map((p) => p.id as `0x${string}`), [all])).data;
   const pairs = pairChips(all, tw.wrapped);
   const isLive = (p: PoolRow) => poolState(p, now, block) !== "closed";
-  // default view: three maturities per pair (live first, then the latest closed); "Show closed" lists everything
+  // default view: pools not closed, three maturities per pair at most; closed ones only behind the history button
   const showClosed = closed;
-  const sorted = (showClosed ? all : latestMaturities(all, isLive))
+  const sorted = (showClosed ? all : latestMaturities(all.filter(isLive), isLive))
     .filter((p) => !market || marketId(p.asset, p.quote, p.kind).toLowerCase() === market.toLowerCase())
     .sort((a, b) => Number(isLive(b)) - Number(isLive(a)) || (isLive(a) ? a.expiry - b.expiry : b.expiry - a.expiry) || (buyBack(a) < buyBack(b) ? -1 : 1));
   // one group per market and pairing (lib/twins): HYPE / USDC right before WHYPE / USDC, the same pools
@@ -147,15 +147,14 @@ export function MarketsScreen() {
             ))}
           </div>
         )}
-        <label className="ml-auto flex min-h-11 items-center gap-2 text-body-sm text-ink-2">
-          <input type="checkbox" className="h-4 w-4 accent-[var(--brand)]" checked={showClosed} onChange={(e) => setClosed(e.target.checked)} />
-          Show closed
-        </label>
+<button type="button" aria-pressed={showClosed} onClick={() => setClosed(!showClosed)} className="ml-auto min-h-11 text-caption text-ink-3 underline-offset-2 hover:text-ink hover:underline" data-testid="history-toggle">
+          {showClosed ? "Hide past markets" : "View past markets"}
+        </button>
         <Link href="/create" className="btn btn-md btn-secondary" data-testid="create-market">
           <Plus size={16} strokeWidth={1.75} aria-hidden /> Create market
         </Link>
       </div>
-      {!all.some(isLive) && all.length > 0 && now > 0 && <p className="mt-2 text-body-sm text-ink-2">No market is open right now; the latest closed ones are shown.</p>}
+      {!all.some(isLive) && all.length > 0 && now > 0 && !showClosed && <p className="mt-2 text-body-sm text-ink-2">No market is open right now. Past markets are behind View past markets.</p>}
       {market && (
         <p className="mt-2 text-body-sm text-ink-2">
           Showing one market.{" "}

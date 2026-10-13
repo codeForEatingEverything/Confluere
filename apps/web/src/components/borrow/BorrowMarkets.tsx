@@ -36,9 +36,9 @@ type StyleFilter = "all" | "0" | "1";
 export function useMarketRows(pools: PoolRow[], o: { pair: string; style: StyleFilter; closed: boolean; now: number; block: bigint; wrapped: string | undefined }) {
   const isLive = (p: PoolRow) => poolState(p, o.now, o.block) !== "closed" && p.expiry > o.now;
   const live = pools.filter(isLive);
-  // default view: three maturities per pair (live first, then the latest matured); "Show matured" lists everything
+  // default view: live pools only, three maturities per pair at most; past markets only behind the history button
   const showClosed = o.closed;
-  const sorted = (showClosed ? pools : latestMaturities(pools, isLive))
+  const sorted = (showClosed ? pools : latestMaturities(live, isLive))
     .filter((p) => o.style === "all" || String(p.kind) === o.style)
     .sort((a, b) => Number(isLive(b)) - Number(isLive(a)) || (isLive(a) ? a.expiry - b.expiry : b.expiry - a.expiry) || (buyBack(a) < buyBack(b) ? -1 : buyBack(a) > buyBack(b) ? 1 : a.kind - b.kind));
   const rows = poolTwins(sorted, o.wrapped).filter((p) => o.pair === "all" || pairKey(p) === o.pair);
@@ -114,10 +114,9 @@ export function BorrowMarkets() {
             ]}
           />
         )}
-        <label className="ml-auto flex min-h-11 items-center gap-2 text-body-sm text-ink-2">
-          <input type="checkbox" className="h-4 w-4 accent-[var(--brand)]" checked={showClosed} onChange={(e) => setClosed(e.target.checked)} />
-          Show matured
-        </label>
+<button type="button" aria-pressed={showClosed} onClick={() => setClosed(!showClosed)} className="ml-auto min-h-11 text-caption text-ink-3 underline-offset-2 hover:text-ink hover:underline" data-testid="history-toggle">
+          {showClosed ? "Hide past markets" : "View past markets"}
+        </button>
       </div>
 
       <div className="mt-4">

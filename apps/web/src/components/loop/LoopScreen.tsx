@@ -70,10 +70,9 @@ export function LoopScreen() {
           </div>
         )}
         {loopPools.length > 0 && (
-          <label className="ml-auto flex min-h-11 items-center gap-2 text-body-sm text-ink-2">
-            <input type="checkbox" className="h-4 w-4 accent-[var(--brand)]" checked={showClosed} onChange={(e) => setClosed(e.target.checked)} />
-            Show matured
-          </label>
+<button type="button" aria-pressed={showClosed} onClick={() => setClosed(!showClosed)} className="ml-auto min-h-11 text-caption text-ink-3 underline-offset-2 hover:text-ink hover:underline" data-testid="history-toggle">
+          {showClosed ? "Hide past markets" : "View past markets"}
+        </button>
         )}
       </div>
 

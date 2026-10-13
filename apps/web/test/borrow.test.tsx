@@ -48,13 +48,12 @@ beforeEach(() => {
 afterEach(cleanup);
 
 describe("borrow markets list", () => {
-  it("explains C and R, three maturities per pair (open first, soonest first, then the latest matured), with buy-back price, C price and rate, R and size", () => {
+  it("explains C and R, open pools only (three maturities per pair at most), soonest first, with buy-back price, C price and rate, R and size; matured hidden", () => {
     wrap(<BorrowMarkets />);
     expect(screen.getByRole("heading", { level: 1 }).textContent).toBe("Borrow markets");
     expect(document.body.textContent).toMatch(/Borrow to get R, lend to get C, or trade either with\s+other holders\./);
     const rows = screen.getAllByTestId("token-markets-row");
-    // two open maturities, so the latest matured one fills the third slot, listed last
-    expect(rows).toHaveLength(4);
+    expect(rows).toHaveLength(3);
     expect(rows[0]!.textContent).toMatch(/WETH \/ USDC/);
     expect(rows[0]!.textContent).toMatch(/2,980\.00/);
     expect(rows[1]!.textContent).toMatch(/3,000\.00.*2,900\.00 USDC.*fixed APR if repaid.*No offers yet.*2\.00 WETH/);
@@ -66,18 +65,20 @@ describe("borrow markets list", () => {
     expect(document.body.textContent).not.toMatch(/auction|batch|strike|P\*/i);
   });
 
-  it("Show matured adds closed pools; a row opens the drawer as a history entry", () => {
+  it("View past markets adds matured pools; a row opens the drawer as a history entry", () => {
     wrap(<BorrowMarkets />);
-    fireEvent.click(screen.getByRole("checkbox", { name: "Show matured" }));
+    fireEvent.click(screen.getByRole("button", { name: "View past markets" }));
     expect(screen.getAllByTestId("token-markets-row")).toHaveLength(4);
     fireEvent.click(screen.getAllByTestId("token-markets-row")[1]!);
     expect(nav.pushed.at(-1)).toBe(`/borrow?pool=${pid("a1")}`);
   });
 
-  it("nothing open: the matured markets are listed anyway, newest first, under a notice", () => {
+  it("nothing open: a notice, no rows; View past markets lists the matured ones", () => {
     DS.pools = [row(pid("z1"), { status: Status.Closed, expiry: NOW - 7200 }), row(pid("z2"), { status: Status.Closed, expiry: NOW - 3600 })];
     wrap(<BorrowMarkets />);
     expect(screen.getByText(/No open market on HyperEVM Testnet right now/)).toBeTruthy();
+    expect(screen.queryAllByTestId("token-markets-row")).toHaveLength(0);
+    fireEvent.click(screen.getByRole("button", { name: "View past markets" }));
     const rows = screen.getAllByTestId("token-markets-row");
     expect(rows).toHaveLength(2);
     expect(rows[0]!.textContent).toMatch(/Closed/);

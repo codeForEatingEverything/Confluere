@@ -80,12 +80,11 @@ function dataset(chainId: number) {
   const markets = new Set(pools.map((p) => marketId(p.asset, p.quote, p.kind)));
   const openMarkets = new Set(open.map((p) => marketId(p.asset, p.quote, p.kind)));
   const loopOpen = loopMarkets(open as never as { kind: Kind; asset: string; bandBps: number }[], chainId);
-  // what the lists show by default: three maturities per pair, live first, then the latest matured (lib/markets)
+  // what the lists show by default: live pools only, three maturities per pair at most (lib/markets)
   const isOpen = (p: (typeof pools)[number]) => p.status === Status.Open && p.expiry > now;
-  const shown = latestMaturities(pools, isOpen);
-  const loopAll = loopMarkets(pools as never as { kind: Kind; asset: string; bandBps: number }[], chainId) as never as typeof pools;
-  const loopShown = latestMaturities(loopAll, isOpen);
-  const shownMarkets = latestMaturities(pools, (p) => p.status !== Status.Closed);
+  const shown = latestMaturities(open, isOpen);
+  const loopShown = latestMaturities(loopOpen as never as typeof pools, isOpen);
+  const shownMarkets = latestMaturities(notClosed, (p) => p.status !== Status.Closed);
   return { pools, open, notClosed, markets, openMarkets, loopOpen, shown, loopShown, shownMarkets };
 }
 
@@ -205,7 +204,7 @@ describe("every page lists the whole sample set", () => {
   for (const chainId of [998, 10143]) {
     const net = chainId === 998 ? "HyperEVM" : "Monad";
 
-    it(`${net}: Borrow and Loop list three maturities per pair (live first), each touching the wrapped coin twice`, async () => {
+    it(`${net}: Borrow and Loop list three live maturities per pair at most, each touching the wrapped coin twice`, async () => {
       setChainChoice(chainId);
       const s = dataset(chainId);
       show(<BorrowMarkets />);
@@ -215,7 +214,7 @@ describe("every page lists the whole sample set", () => {
       await waitFor(() => expect(rows("loop-markets")).toBe(listed(chainId, s.loopShown)), { timeout: 8000 });
     }, 20_000);
 
-    it(`${net}: Markets lists three maturities per pair (not closed first), grouped by market and pairing`, async () => {
+    it(`${net}: Markets lists three not-closed maturities per pair at most, grouped by market and pairing`, async () => {
       setChainChoice(chainId);
       const s = dataset(chainId);
       show(<MarketsScreen />);

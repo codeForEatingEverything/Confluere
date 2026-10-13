@@ -266,14 +266,19 @@ function VaultBody({ v, quote, asset, role, native, wrapped = false }: { v: Vaul
             v={
               positions && positions.length > 0 ? (
                 <span className="flex flex-col items-end gap-1">
-                  {positions.map((p) => {
-                    const pool = pools.find((x) => x.id.toLowerCase() === p.poolId.toLowerCase());
+                  {/* three live maturities at most, the same rule as the market lists */}
+                  {[...positions]
+                    .map((p) => ({ p, pool: pools.find((x) => x.id.toLowerCase() === p.poolId.toLowerCase()) }))
+                    .filter(({ pool }) => (pool?.expiry ?? 0) > now)
+                    .sort((a, b) => (a.pool?.expiry ?? 0) - (b.pool?.expiry ?? 0))
+                    .slice(0, 3)
+                    .map(({ p, pool }) => {
                     return (
                       <Link key={p.poolId} href={`/markets?pool=${p.poolId}`} className="link">
                         {pool ? <DateTime ts={pool.expiry} /> : "a market"}
                       </Link>
                     );
-                  })}
+                    })}
                 </span>
               ) : (
                 "Nothing yet this period"
