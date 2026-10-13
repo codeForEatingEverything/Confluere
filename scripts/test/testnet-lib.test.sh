@@ -251,11 +251,11 @@ if FAKE_BAL_USDC=13816575 lib 'preflight' > "$T/out" 2>&1; then fail "preflight 
 grep -q "faucet.circle.com" "$T/out" || fail "no USDC hint when only the extra pair is short"
 # the USDC need is what the seed's buys escrow (OrderLogic BUY: quoteUp(units * limit) + ttl per order). Monad at 1%
 # units, strikes 0.025 / 0.026 USDC: per kind 1476 + 1536 rounded up per order, plus 6 x 48 wei of ttl; x 2 kinds =
-# 6600, plus the extra pair shMON/USDC's buys (0.4% units, strikes 0.021 / 0.023 USDC) = 9260. Just below that must
+# 6600, plus the extra pair shMON/USDC's buys (0.48% units, strikes 0.021 / 0.023 USDC) = 9674. Just below that must
 # stop (the seed would revert halfway); exactly that passes.
-if LIBCHAIN=monad FAKE_BAL_USDC=9259 lib 'preflight' > "$T/out" 2>&1; then fail "preflight passed 1 wei short of the buys' escrow"; fi
-grep -qE "usdc +need 9260 " "$T/out" || fail "USDC need is not the escrow sum: $(grep usdc "$T/out")"
-LIBCHAIN=monad FAKE_BAL_USDC=9260 lib 'preflight' > "$T/out" 2>&1 || fail "preflight failed with exactly the escrow"
+if LIBCHAIN=monad FAKE_BAL_USDC=9673 lib 'preflight' > "$T/out" 2>&1; then fail "preflight passed 1 wei short of the buys' escrow"; fi
+grep -qE "usdc +need 9674 " "$T/out" || fail "USDC need is not the escrow sum: $(grep usdc "$T/out")"
+LIBCHAIN=monad FAKE_BAL_USDC=9674 lib 'preflight' > "$T/out" 2>&1 || fail "preflight failed with exactly the escrow"
 # the ttl preflight counts is the one Seed.s.sol places
 grep -qE "p\.ttl = $(bash -c ". '$ROOT/scripts/lib/testnet.sh' 2>/dev/null; echo \$SEED_TTL");" "$ROOT/contracts/script/Seed.s.sol" \
   || fail "SEED_TTL in scripts/lib/testnet.sh differs from Seed.s.sol's p.ttl"
