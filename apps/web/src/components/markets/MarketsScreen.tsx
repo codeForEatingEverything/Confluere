@@ -26,7 +26,7 @@ import { Chip, ErrorRow, List, Pill, TokenIcon, type Column, useLiveNow } from "
 import { PoolDrawer, stateWord } from "./PoolDrawer";
 import { VaultTable } from "./VaultTable";
 import { VaultDrawer } from "../earn/VaultDrawer";
-import { isPegged } from "@/lib/markets";
+import { latestMaturities, isPegged } from "@/lib/markets";
 import { loopMarkets } from "@/lib/loop";
 import { Plus } from "lucide-react";
 import { pairKey, pairName, payOf, shownToken, poolTwins, twinKey, type Twinned } from "@/lib/twins";
@@ -56,12 +56,12 @@ export function MarketsScreen() {
   const supplies = usePoolSupplies(all.map((p) => p.id)).data;
   const offers = useBestOffers(useMemo(() => all.filter((p) => p.status !== Status.Closed).map((p) => p.id as `0x${string}`), [all])).data;
   const pairs = pairChips(all, tw.wrapped);
-  const openCount = all.filter((p) => poolState(p, now, block) !== "closed").length;
-  const showClosed = closed || (openCount === 0 && all.length > 0);
-  const sorted = all
-    .filter((p) => (showClosed ? true : poolState(p, now, block) !== "closed"))
+  const isLive = (p: PoolRow) => poolState(p, now, block) !== "closed";
+  // default view: three maturities per pair (live first, then the latest closed); "Show closed" lists everything
+  const showClosed = closed;
+  const sorted = (showClosed ? all : latestMaturities(all, isLive))
     .filter((p) => !market || marketId(p.asset, p.quote, p.kind).toLowerCase() === market.toLowerCase())
-    .sort((a, b) => (showClosed ? b.expiry - a.expiry : a.expiry - b.expiry) || (buyBack(a) < buyBack(b) ? -1 : 1));
+    .sort((a, b) => Number(isLive(b)) - Number(isLive(a)) || (isLive(a) ? a.expiry - b.expiry : b.expiry - a.expiry) || (buyBack(a) < buyBack(b) ? -1 : 1));
   // one group per market and pairing (lib/twins): HYPE / USDC right before WHYPE / USDC, the same pools
   const rows = poolTwins(sorted, tw.wrapped).filter((p) => pair === "all" || pairKey(p) === pair);
   const gkey = (p: Twinned<PoolRow>) => twinKey(marketId(p.asset, p.quote, p.kind), p.via);
@@ -155,7 +155,7 @@ export function MarketsScreen() {
           <Plus size={16} strokeWidth={1.75} aria-hidden /> Create market
         </Link>
       </div>
-      {openCount === 0 && all.length > 0 && now > 0 && <p className="mt-2 text-body-sm text-ink-2">No market is open right now; closed ones are shown, newest first.</p>}
+      {!all.some(isLive) && all.length > 0 && now > 0 && <p className="mt-2 text-body-sm text-ink-2">No market is open right now; the latest closed ones are shown.</p>}
       {market && (
         <p className="mt-2 text-body-sm text-ink-2">
           Showing one market.{" "}

@@ -41,7 +41,7 @@ import { indexPools, readCall, resetDemoNetworks } from "../src/lib/demo/chain";
 import { ActiveChainProvider, setChainChoice } from "../src/lib/activeChain";
 import { deploymentOf, launchTokensOf } from "../src/lib/chains";
 import { loopMarkets } from "../src/lib/loop";
-import { isPegged } from "../src/lib/markets";
+import { isPegged, latestMaturities } from "../src/lib/markets";
 import { pairsOf, selectorTokens } from "../src/lib/product";
 import { isNative } from "../src/lib/native";
 import { tokenLogo } from "../src/lib/logos";
@@ -80,7 +80,13 @@ function dataset(chainId: number) {
   const markets = new Set(pools.map((p) => marketId(p.asset, p.quote, p.kind)));
   const openMarkets = new Set(open.map((p) => marketId(p.asset, p.quote, p.kind)));
   const loopOpen = loopMarkets(open as never as { kind: Kind; asset: string; bandBps: number }[], chainId);
-  return { pools, open, notClosed, markets, openMarkets, loopOpen };
+  // what the lists show by default: three maturities per pair, live first, then the latest matured (lib/markets)
+  const isOpen = (p: (typeof pools)[number]) => p.status === Status.Open && p.expiry > now;
+  const shown = latestMaturities(pools, isOpen);
+  const loopAll = loopMarkets(pools as never as { kind: Kind; asset: string; bandBps: number }[], chainId) as never as typeof pools;
+  const loopShown = latestMaturities(loopAll, isOpen);
+  const shownMarkets = latestMaturities(pools, (p) => p.status !== Status.Closed);
+  return { pools, open, notClosed, markets, openMarkets, loopOpen, shown, loopShown, shownMarkets };
 }
 
 /** Rows a list shows for a set of on-chain rows: each once, plus one native twin for each row touching the wrapped coin. */
@@ -199,22 +205,22 @@ describe("every page lists the whole sample set", () => {
   for (const chainId of [998, 10143]) {
     const net = chainId === 998 ? "HyperEVM" : "Monad";
 
-    it(`${net}: Borrow lists every open pool, Loop every open loop pool, each touching the wrapped coin twice`, async () => {
+    it(`${net}: Borrow and Loop list three maturities per pair (live first), each touching the wrapped coin twice`, async () => {
       setChainChoice(chainId);
       const s = dataset(chainId);
       show(<BorrowMarkets />);
-      await waitFor(() => expect(rows("token-markets")).toBe(listed(chainId, s.open)), { timeout: 8000 });
+      await waitFor(() => expect(rows("token-markets")).toBe(listed(chainId, s.shown)), { timeout: 8000 });
       cleanup();
       show(<LoopScreen />);
-      await waitFor(() => expect(rows("loop-markets")).toBe(listed(chainId, s.loopOpen as never)), { timeout: 8000 });
+      await waitFor(() => expect(rows("loop-markets")).toBe(listed(chainId, s.loopShown)), { timeout: 8000 });
     }, 20_000);
 
-    it(`${net}: Markets lists every pool that is not closed, grouped by market and pairing`, async () => {
+    it(`${net}: Markets lists three maturities per pair (not closed first), grouped by market and pairing`, async () => {
       setChainChoice(chainId);
       const s = dataset(chainId);
       show(<MarketsScreen />);
-      await waitFor(() => expect(rows("markets")).toBe(listed(chainId, s.notClosed)), { timeout: 8000 });
-      const groups = [...new Map(s.notClosed.map((p) => [marketId(p.asset, p.quote, p.kind), p])).values()];
+      await waitFor(() => expect(rows("markets")).toBe(listed(chainId, s.shownMarkets)), { timeout: 8000 });
+      const groups = [...new Map(s.shownMarkets.map((p) => [marketId(p.asset, p.quote, p.kind), p])).values()];
       expect(screen.getAllByTestId("markets")).toHaveLength(listed(chainId, groups));
     }, 20_000);
 

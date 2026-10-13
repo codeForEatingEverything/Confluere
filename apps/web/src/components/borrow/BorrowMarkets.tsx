@@ -6,6 +6,7 @@
  * price with its break-even, the buy-back price and the size; a row opens the market drawer with the token cards, the
  * chart and the trade card (?pool=, shareable; ?token=ft|br and ?trade=lend pick the token).
  */
+import { latestMaturities } from "@/lib/markets";
 import { useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import type { Address } from "viem";
@@ -33,12 +34,13 @@ type StyleFilter = "all" | "0" | "1";
  * (lib/twins): its native pairing (HYPE / USDC) right before the on-chain one (WHYPE / USDC). `pair` is a `pairKey`.
  */
 export function useMarketRows(pools: PoolRow[], o: { pair: string; style: StyleFilter; closed: boolean; now: number; block: bigint; wrapped: string | undefined }) {
-  const live = pools.filter((p) => poolState(p, o.now, o.block) !== "closed" && p.expiry > o.now);
-  const showClosed = o.closed || (live.length === 0 && pools.length > 0);
-  const sorted = pools
-    .filter((p) => (showClosed ? true : poolState(p, o.now, o.block) !== "closed" && p.expiry > o.now))
+  const isLive = (p: PoolRow) => poolState(p, o.now, o.block) !== "closed" && p.expiry > o.now;
+  const live = pools.filter(isLive);
+  // default view: three maturities per pair (live first, then the latest matured); "Show matured" lists everything
+  const showClosed = o.closed;
+  const sorted = (showClosed ? pools : latestMaturities(pools, isLive))
     .filter((p) => o.style === "all" || String(p.kind) === o.style)
-    .sort((a, b) => (showClosed && live.length === 0 ? b.expiry - a.expiry : a.expiry - b.expiry) || (buyBack(a) < buyBack(b) ? -1 : buyBack(a) > buyBack(b) ? 1 : a.kind - b.kind));
+    .sort((a, b) => Number(isLive(b)) - Number(isLive(a)) || (isLive(a) ? a.expiry - b.expiry : b.expiry - a.expiry) || (buyBack(a) < buyBack(b) ? -1 : buyBack(a) > buyBack(b) ? 1 : a.kind - b.kind));
   const rows = poolTwins(sorted, o.wrapped).filter((p) => o.pair === "all" || pairKey(p) === o.pair);
   return { rows, live, showClosed };
 }

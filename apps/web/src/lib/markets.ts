@@ -78,3 +78,23 @@ export function pastExpiries(anchor: number, period: number, now: number, n = 4)
   for (let e = last; out.length < n && e >= anchor; e -= period) if (e < now) out.push(e);
   return out;
 }
+
+/**
+ * The default list view: per pair (asset, quote), three maturities. Live maturities come first, soonest first; when
+ * fewer than three are live, the most recently matured ones fill up to three. Every pool of a chosen maturity (each
+ * buy-back price and repay style) is kept. `isLive` decides what still counts as open.
+ */
+export function latestMaturities<P extends { asset: string; quote: string; expiry: number }>(pools: P[], isLive: (p: P) => boolean, n = 3): P[] {
+  const byPair = new Map<string, P[]>();
+  for (const p of pools) {
+    const k = `${p.asset.toLowerCase()}-${p.quote.toLowerCase()}`;
+    byPair.set(k, [...(byPair.get(k) ?? []), p]);
+  }
+  const keep = new Set<string>();
+  for (const [k, ps] of byPair) {
+    const live = [...new Set(ps.filter(isLive).map((p) => p.expiry))].sort((a, b) => a - b);
+    const past = [...new Set(ps.filter((p) => !isLive(p)).map((p) => p.expiry))].filter((e) => !live.includes(e)).sort((a, b) => b - a);
+    for (const e of [...live, ...past].slice(0, n)) keep.add(`${k}-${e}`);
+  }
+  return pools.filter((p) => keep.has(`${p.asset.toLowerCase()}-${p.quote.toLowerCase()}-${p.expiry}`));
+}

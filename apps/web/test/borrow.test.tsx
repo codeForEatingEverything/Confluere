@@ -48,12 +48,13 @@ beforeEach(() => {
 afterEach(cleanup);
 
 describe("borrow markets list", () => {
-  it("explains C and R, one row per open pool, soonest first, with buy-back price, C price and rate, R and size; matured hidden", () => {
+  it("explains C and R, three maturities per pair (open first, soonest first, then the latest matured), with buy-back price, C price and rate, R and size", () => {
     wrap(<BorrowMarkets />);
     expect(screen.getByRole("heading", { level: 1 }).textContent).toBe("Borrow markets");
     expect(document.body.textContent).toMatch(/Borrow to get R, lend to get C, or trade either with\s+other holders\./);
     const rows = screen.getAllByTestId("token-markets-row");
-    expect(rows).toHaveLength(3);
+    // two open maturities, so the latest matured one fills the third slot, listed last
+    expect(rows).toHaveLength(4);
     expect(rows[0]!.textContent).toMatch(/WETH \/ USDC/);
     expect(rows[0]!.textContent).toMatch(/2,980\.00/);
     expect(rows[1]!.textContent).toMatch(/3,000\.00.*2,900\.00 USDC.*fixed APR if repaid.*No offers yet.*2\.00 WETH/);
@@ -69,7 +70,7 @@ describe("borrow markets list", () => {
     wrap(<BorrowMarkets />);
     fireEvent.click(screen.getByRole("checkbox", { name: "Show matured" }));
     expect(screen.getAllByTestId("token-markets-row")).toHaveLength(4);
-    fireEvent.click(screen.getAllByTestId("token-markets-row")[2]!);
+    fireEvent.click(screen.getAllByTestId("token-markets-row")[1]!);
     expect(nav.pushed.at(-1)).toBe(`/borrow?pool=${pid("a1")}`);
   });
 

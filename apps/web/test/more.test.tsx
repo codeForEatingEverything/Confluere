@@ -38,15 +38,16 @@ beforeEach(() => {
 afterEach(cleanup);
 
 describe("markets pro view", () => {
-  it("grouped by market, one row per maturity with fixed rate, buy-back, last traded and a status pill; closed hidden by default", () => {
+  it("grouped by market, three maturities per pair (not closed first, then the latest closed) with fixed rate, buy-back, last traded and a status pill", () => {
     wrap(<MarketsScreen />);
     expect(screen.getByRole("heading", { name: "WETH / USDC" })).toBeTruthy();
     const rows = screen.getAllByTestId("markets-row");
-    expect(rows).toHaveLength(2);
-    // soonest first: the matured maturity, then the open one
+    expect(rows).toHaveLength(3);
+    // not closed first, soonest first (the matured one still repaying, then the open one), then the latest closed
     expect(rows[0]!.textContent).toMatch(/Repaying/);
     expect(rows[1]!.textContent).toMatch(/3,000\.00/);
     expect(rows[1]!.textContent).toMatch(/Open · /);
+    expect(rows[2]!.textContent).toMatch(/Closed/);
     expect(screen.getByText("Seat vacant")).toBeTruthy();
   });
 

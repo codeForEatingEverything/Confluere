@@ -39,3 +39,21 @@ describe("groupMarkets", () => {
     expect(pastExpiries(1000, 100, 1150)).toEqual([1100, 1000]);
   });
 });
+
+describe("latestMaturities: three maturities per pair", () => {
+  const A = "0xa", B = "0xb", C = "0xc";
+  const mk = (asset: string, quote: string, expiry: number, live: boolean) => ({ asset, quote, expiry, live });
+  const live = (p: { live: boolean }) => p.live;
+  it("more than three live: the soonest three, every pool of each kept", async () => {
+    const { latestMaturities } = await import("../src/lib/markets");
+    const ps = [1, 2, 3, 4, 5].flatMap((e) => [mk(A, B, e, true), mk(A, B, e, true)]);
+    expect([...new Set(latestMaturities(ps, live).map((p) => p.expiry))]).toEqual([1, 2, 3]);
+    expect(latestMaturities(ps, live)).toHaveLength(6);
+  });
+  it("fewer than three live: filled with the latest matured; each pair counted on its own", async () => {
+    const { latestMaturities } = await import("../src/lib/markets");
+    const ps = [mk(A, B, 1, false), mk(A, B, 2, false), mk(A, B, 3, false), mk(A, B, 9, true), mk(A, C, 1, false)];
+    expect(latestMaturities(ps, live).filter((p) => p.quote === B).map((p) => p.expiry).sort()).toEqual([2, 3, 9]);
+    expect(latestMaturities(ps, live).filter((p) => p.quote === C)).toHaveLength(1);
+  });
+});
