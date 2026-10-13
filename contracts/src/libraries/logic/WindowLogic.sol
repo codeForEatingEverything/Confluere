@@ -1,0 +1,108 @@
+// SPDX-License-Identifier: BUSL-1.1
+pragma solidity 0.8.37;
+
+import {IConfluere} from "../../interfaces/IConfluere.sol";
+import {PoolKeyLib, Kind, Status} from "../PoolKey.sol";
+import {Order, Book, BID} from "../OrderSet.sol";
+import {Clearing} from "../Clearing.sol";
+import {Settlement} from "../Settlement.sol";
+import {CoreState, PoolState, Params, CoreLib} from "../State.sol";
+
+/// @notice Repayment, the abandonment auction at window close, and final claims. Linked library.
+library WindowLogic {
+    using CoreLib for CoreState;
+    using CoreLib for PoolState;
+    using PoolKeyLib for bytes32;
+
+    /// @notice Pay K per whole asset (rounded up) to buy back `units`. American: any time until the window ends.
+    /// European: only inside the window. The spread share comes out of what is paid.
+    function repay(CoreState storage s, Params memory pr, bytes32 poolId, uint96 units) external {
+        PoolState storage ps = s.pool(poolId);
+        bool early = ps.key.kind == Kind.American && ps.status == Status.Open && block.timestamp < ps.key.expiry;
+        if (!(early || s.windowOpen(ps))) {
+            revert IConfluere.InvalidState();
+        }
+        if (units == 0) revert IConfluere.InvalidParams();
+        if (s.freeR(msg.sender, poolId) < units) revert IConfluere.Locked();
+
+        uint256 sc = ps.scale();
+        uint256 pay = Settlement.repayAmount(units, ps.key.strike, sc);
+        uint256 fee = Settlement.fee(units, ps.key.strike, ps.vwap(), ps.feeBps, sc);
+        s.burn(msg.sender, poolId.rId(), units);
+        ps.quoteBal += pay - fee;
+        ps.assetBal -= units;
+        s.pending[ps.key.quote][pr.treasury] += fee;
+        if (fee != 0) s.marketFees[ps.marketId] += fee;
+        CoreLib.pullExact(ps.key.quote, pay);
+        CoreLib.push(ps.key.asset, msg.sender, units);
+        emit IConfluere.Repaid(poolId, msg.sender, units, pay, fee);
+    }
+
+    /// @notice Segmented close: each call fills at most `maxBids` bids from the top, then refunds them.
+    /// Unrepaid units nobody bid on stay in the pool for C holders (default). Returns true once Closed.
+    function closeWindow(CoreState storage s, bytes32 poolId, uint256 maxBids) external returns (bool done) {
+        PoolState storage ps = s.pool(poolId);
+        if (ps.status == Status.Window) {
+            if (block.number < ps.windowEnd) revert IConfluere.InvalidState();
+            ps.status = Status.Closing;
+            ps.closeRemaining = s.totalSupply[poolId.rId()];
+        }
+        if (ps.status != Status.Closing) revert IConfluere.InvalidState();
+
+        Book storage bk = s.books[poolId][BID];
+        for (uint256 n; n < maxBids && bk.head != 0; ++n) {
+            uint64 id = bk.head;
+            _fillBid(s, ps, poolId, id);
+            s.removeWithRefund(poolId, ps, id, CoreLib.RM_BID_CLOSED);
+        }
+        if (bk.head == 0) {
+            ps.status = Status.Closed;
+            emit IConfluere.WindowClosed(poolId, ps.quoteBal, ps.assetBal, ps.surplusBal);
+            return true;
+        }
+    }
+
+    function _fillBid(CoreState storage s, PoolState storage ps, bytes32 poolId, uint64 id) private {
+        Order storage o = s.orders[poolId][id];
+        uint256 rem = ps.closeRemaining;
+        uint256 f = o.units < rem ? o.units : rem;
+        if (f == 0) return;
+        uint256 sc = ps.scale();
+        uint256 cost = Clearing.quoteUp(f, ps.key.strike + o.limit, sc);
+        uint256 kPart = Clearing.quoteUp(f, ps.key.strike, sc);
+        ps.closeRemaining = rem - f;
+        ps.quoteBal += kPart;
+        ps.surplusBal += cost - kPart;
+        ps.assetBal -= f;
+        o.escrow -= uint128(cost);
+        s.pending[ps.key.asset][o.owner] += f;
+        emit IConfluere.BidFilled(poolId, id, f, kPart, cost - kPart);
+    }
+
+    /// @notice Burn the caller's C (pro-rata quote and defaulted asset) and free R (pro-rata auction surplus).
+    function claim(CoreState storage s, bytes32 poolId) external returns (uint256 quoteOut, uint256 assetOut) {
+        PoolState storage ps = s.pool(poolId);
+        if (ps.status != Status.Closed) revert IConfluere.InvalidState();
+        uint256 cId = poolId.cId();
+        uint256 c = s.balanceOf[msg.sender][cId];
+        if (c != 0) {
+            uint256 supply = s.totalSupply[cId];
+            quoteOut = Settlement.share(c, ps.quoteBal, supply);
+            assetOut = Settlement.share(c, ps.assetBal, supply);
+            ps.quoteBal -= quoteOut;
+            ps.assetBal -= assetOut;
+            s.burn(msg.sender, cId, c);
+        }
+        uint256 r = s.freeR(msg.sender, poolId);
+        if (r != 0) {
+            uint256 rId = poolId.rId();
+            uint256 surplus = Settlement.share(r, ps.surplusBal, s.totalSupply[rId]);
+            ps.surplusBal -= surplus;
+            quoteOut += surplus;
+            s.burn(msg.sender, rId, r);
+        }
+        if (quoteOut != 0) CoreLib.push(ps.key.quote, msg.sender, quoteOut);
+        if (assetOut != 0) CoreLib.push(ps.key.asset, msg.sender, assetOut);
+        emit IConfluere.Claimed(poolId, msg.sender, quoteOut, assetOut);
+    }
+}
