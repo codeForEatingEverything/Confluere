@@ -26,21 +26,38 @@ library DeployConfig {
         uint256[] seatObligations; // per-batch competitive notional a seat holder must post (blueprint §13 Q2 open)
     }
 
-    /// @param demo minute-scale grid and short windows so the whole lifecycle fits in a live demo
+    /// @notice Grid presets. Production: weekly Friday expiries, 30-minute batches. Demo: 1 h expiries, 2-minute
+    /// batches and ~5-minute windows so the whole lifecycle fits in a live demo. Daily (testnets): daily expiries
+    /// listed up to 15 days ahead, so 1-, 7- and 14-day maturities trade side by side, 2-minute batches, production
+    /// windows (~2 h of blocks).
+    enum Preset {
+        Production,
+        Demo,
+        Daily
+    }
+
+    /// @param preset grid and window preset (Demo shortens the windows too; Daily keeps the production windows)
     /// @param grad one entry per chain, in the order of the table below (Monad, Monad testnet, HyperEVM,
     /// HyperEVM testnet, anvil). The whole table is part of the init code, so pass the same table on every chain.
-    function build(bool demo, address[5] memory treasury, address guardian, Grad[5] memory grad)
+    function build(Preset preset, address[5] memory treasury, address guardian, Grad[5] memory grad)
         internal
         pure
         returns (Confluere.Config memory c)
     {
-        c.grid = demo
-            ? GridConfig({
+        bool demo = preset == Preset.Demo;
+        if (preset == Preset.Demo) {
+            c.grid = GridConfig({
                 anchor: FRIDAY_ANCHOR, period: 1 hours, batchInterval: 2 minutes, maxExpiries: 4, strikeSigDigits: 2
-            })
-            : GridConfig({
+            });
+        } else if (preset == Preset.Daily) {
+            c.grid = GridConfig({
+                anchor: FRIDAY_ANCHOR, period: 1 days, batchInterval: 2 minutes, maxExpiries: 15, strikeSigDigits: 2
+            });
+        } else {
+            c.grid = GridConfig({
                 anchor: FRIDAY_ANCHOR, period: 7 days, batchInterval: 30 minutes, maxExpiries: 4, strikeSigDigits: 2
             });
+        }
         c.maxOrdersPerSide = 128; // ~6.6M gas worst case: fits Monad blocks and HyperEVM big blocks
         c.maxBids = 64;
         c.chains = new Confluere.ChainParams[](5);

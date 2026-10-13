@@ -20,6 +20,8 @@ import {MockERC20} from "../src/mocks/MockERC20.sol";
 /// alone, so a failed run can be repeated.
 /// Env: TREASURY (protocol multisig: receives taxes and the protocol's fee share),
 ///      DEMO (bool, default false; minute-scale grid, testnets and anvil only),
+///      GRID ("daily" or unset; testnets and anvil only, not with DEMO): daily expiries listed 15 days ahead, 2-minute
+///      batches, production windows (DeployConfig.Preset.Daily),
 ///      GUARDIAN_MEMBERS ("0xa,0xb,0xc") + GUARDIAN_THRESHOLD: deploy the Guardian multisig (CREATE2, same members and
 ///      threshold on every chain, so the same address; required on mainnets); or GUARDIAN: an existing address
 ///      (testnets and demos),
@@ -57,10 +59,10 @@ contract Deploy is Script {
     }
 
     function run() external returns (Confluere core) {
-        bool demo = vm.envOr("DEMO", false);
         bytes32 salt = vm.envOr("SALT", bytes32(uint256(0xc0f1)));
         bool mocks = vm.envOr("MOCKS", false);
-        _guards(demo, mocks);
+        DeployConfig.Preset preset = _preset(vm.envOr("DEMO", false));
+        _guards(preset, mocks);
 
         vm.startBroadcast();
         (, address deployer,) = vm.readCallers();
@@ -78,8 +80,8 @@ contract Deploy is Script {
         }
         Guardian g = _deployGuardian(salt, deployer);
         address guardian = address(g) != address(0) ? address(g) : vm.envAddress("GUARDIAN");
-        Confluere.Config memory cfg = DeployConfig.build(demo, registries, guardian, grad);
-        _preflight(cfg, demo);
+        Confluere.Config memory cfg = DeployConfig.build(preset, registries, guardian, grad);
+        _preflight(cfg, preset);
         uint256 deployBlock;
         (core, deployBlock) = _deployCore(salt, cfg, reg, g);
         Periphery memory p = _periphery(IConfluere(address(core)), salt);
@@ -88,7 +90,7 @@ contract Deploy is Script {
         vm.stopBroadcast();
 
         _check(core, cfg);
-        _write(core, cfg, demo, p, t, deployBlock);
+        _write(core, cfg, preset, p, t, deployBlock);
         console2.log("Confluere", address(core));
     }
 
@@ -108,17 +110,24 @@ contract Deploy is Script {
         if (address(g).code.length == 0) g = new Guardian{salt: salt}(deployer, members, threshold);
     }
 
-    /// @dev Checked before anything is broadcast. A forgotten env var must not put a demo grid (1 h expiries,
-    /// 5-minute windows, immutable) or mintable mock tokens on a production chain, nor leave a mainnet with a
-    /// single-key guardian.
-    function _guards(bool demo, bool mocks) internal view {
+    /// @dev DEMO=true picks the demo grid, GRID=daily the daily testnet grid (not both); neither, production.
+    function _preset(bool demo) internal view returns (DeployConfig.Preset) {
+        string memory g = vm.envOr("GRID", string(""));
+        bool daily = keccak256(bytes(g)) == keccak256("daily");
+        require(daily || bytes(g).length == 0, "GRID: daily or unset");
+        require(!(daily && demo), "DEMO and GRID=daily are exclusive");
+        if (daily) return DeployConfig.Preset.Daily;
+        return demo ? DeployConfig.Preset.Demo : DeployConfig.Preset.Production;
+    }
+
+    /// @dev Checked before anything is broadcast. A forgotten env var must not put a demo or daily grid (immutable)
+    /// or mintable mock tokens on a production chain, nor leave a mainnet with a single-key guardian.
+    function _guards(DeployConfig.Preset preset, bool mocks) internal view {
         uint256 id = block.chainid;
         bool mainnet = id == DeployConfig.MONAD || id == DeployConfig.HYPEREVM;
-        require(
-            !demo || id == DeployConfig.MONAD_TESTNET || id == DeployConfig.HYPEREVM_TESTNET
-                || id == DeployConfig.ANVIL,
-            "demo: testnets and anvil only"
-        );
+        bool test = id == DeployConfig.MONAD_TESTNET || id == DeployConfig.HYPEREVM_TESTNET || id == DeployConfig.ANVIL;
+        require(preset != DeployConfig.Preset.Demo || test, "demo: testnets and anvil only");
+        require(preset != DeployConfig.Preset.Daily || test, "daily grid: testnets and anvil only");
         require(!mocks || id == DeployConfig.ANVIL, "mocks: anvil only");
         require(
             !mainnet || bytes(vm.envOr("GUARDIAN_MEMBERS", string(""))).length != 0,
@@ -135,7 +144,8 @@ contract Deploy is Script {
     /// @dev ARCH 7.2: before anything is deployed, the table must have a row for this chain, and a production
     /// deployment must use the documented grid and the calibrated windows (re-measure 24 h of blocks first:
     /// the ops package has a blocktime command).
-    function _preflight(Confluere.Config memory cfg, bool demo) internal view {
+    function _preflight(Confluere.Config memory cfg, DeployConfig.Preset preset) internal view {
+        bool demo = preset == DeployConfig.Preset.Demo;
         bool found;
         for (uint256 i; i < cfg.chains.length; ++i) {
             if (cfg.chains[i].chainId != block.chainid) continue;
@@ -152,7 +162,10 @@ contract Deploy is Script {
             }
         }
         require(found, "no chain parameters for this chain id");
-        if (!demo) {
+        if (preset == DeployConfig.Preset.Daily) {
+            require(cfg.grid.period == 1 days && cfg.grid.batchInterval == 2 minutes, "daily grid: 1 day, 2 min");
+            require(cfg.grid.maxExpiries == 15, "daily grid: 15 expiries listed");
+        } else if (!demo) {
             require(
                 cfg.grid.period == 7 days && cfg.grid.batchInterval == 30 minutes, "production grid: weekly, 30 min"
             );
@@ -331,7 +344,7 @@ contract Deploy is Script {
     function _write(
         Confluere core,
         Confluere.Config memory cfg,
-        bool demo,
+        DeployConfig.Preset preset,
         Periphery memory p,
         Tokens memory t,
         uint256 deployBlock
@@ -345,7 +358,13 @@ contract Deploy is Script {
             vm.serializeString(k, "tokens", tj);
         }
         vm.serializeUint(k, "chainId", block.chainid);
-        vm.serializeBool(k, "demo", demo);
+        vm.serializeBool(k, "demo", preset == DeployConfig.Preset.Demo);
+        vm.serializeString(
+            k,
+            "grid",
+            preset == DeployConfig.Preset.Daily ? "daily" : preset == DeployConfig.Preset.Demo ? "demo" : "production"
+        );
+        vm.serializeUint(k, "maxExpiries", cfg.grid.maxExpiries);
         vm.serializeUint(k, "windowBlocks", core.WINDOW_BLOCKS());
         vm.serializeUint(k, "gridAnchor", cfg.grid.anchor);
         vm.serializeUint(k, "gridPeriod", cfg.grid.period);
