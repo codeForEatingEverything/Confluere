@@ -12,6 +12,7 @@ import { Card } from "../ui";
 import { BorrowSwap } from "./BorrowSwap";
 import { RepaySwap } from "./RepaySwap";
 import { LoopSwap, useHasLoopMarkets } from "./LoopSwap";
+import { useDemo } from "@/lib/demo/mode";
 
 type Mode = "borrow" | "repay" | "loop";
 
@@ -21,6 +22,7 @@ const CLAIMS = ["oracle.", "intermediary.", "MEV.", "slippage."];
 const MODE_LABEL: Record<Mode, string> = { borrow: "Borrow", repay: "Repay", loop: "Loop" };
 
 export function HomeScreen() {
+  const demo = useDemo();
   const params = useSearchParams();
   const asked = params?.get("mode");
   const [mode, setMode] = useState<Mode>(asked === "repay" || asked === "loop" ? asked : "borrow");
@@ -52,6 +54,14 @@ export function HomeScreen() {
                 Read more
               </Link>
             </p>
+            {!demo && (
+              <div className="mt-5 flex flex-wrap items-center gap-3">
+                <Link href="/developers/demo" className="btn btn-md btn-secondary" data-testid="home-demo">
+                  Try the demo
+                </Link>
+                <span className="text-caption text-ink-3">The same app on sample data: sign a message, see it fill.</span>
+              </div>
+            )}
           </div>
         </div>
       </header>

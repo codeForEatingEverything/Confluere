@@ -43,6 +43,7 @@ describe("home: borrow", () => {
   it("a short intro with Read more, then the card; nothing about lending or positions", () => {
     wrap(<HomeScreen />);
     expect(screen.getByRole("link", { name: "Read more" }).getAttribute("href")).toBe("/how-it-works#different");
+    expect(screen.getByTestId("home-demo").getAttribute("href")).toBe("/developers/demo");
     expect(screen.getByRole("tab", { name: "Borrow" }).getAttribute("aria-selected")).toBe("true");
     expect(screen.getByRole("tab", { name: "Repay" })).toBeTruthy();
     expect(screen.queryByTestId("lend-input")).toBeNull();
