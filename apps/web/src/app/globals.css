@@ -1,0 +1,731 @@
+@import "tailwindcss";
+
+/*
+ * Hallmark · macrostructure: Workbench · genre: modern-minimal · theme: custom (petrol)
+ * nav: N1b · footer: Ft2 · pre-emit critique: P4 H5 E4 S4 R4 V4
+ *
+ * Confluere visual system v3 (docs/FRONTEND_V3.md §7). A clean desk with one thick card on it: a pale cyan-grey canvas,
+ * raised white surfaces with two-step shadows, filled wells for inputs, one petrol brand colour. No hairline sheets, no
+ * glow, no gradients, no glass. <html data-theme> is set before first paint by lib/theme.ts; without JS the
+ * prefers-color-scheme block below applies.
+ */
+:root {
+  color-scheme: light;
+  --canvas: #f2f8f9;
+  --surface: #fcfefe;
+  --surface-2: #eaf2f3;
+  --well: #eaf2f3;
+  --line: #d7e0e2;
+  --line-strong: #8a9699;
+  --ink: #0b181c;
+  --ink-2: #4c5b5f;
+  --ink-3: #5d6a6e;
+  --brand: #007481;
+  --brand-hover: #00626f;
+  --brand-soft: #d1f3f6;
+  --brand-ink: #004a56;
+  --on-brand: #fcfefe;
+  /* R badge (buy-back right): a warm neutral beside the petrol C badge */
+  --accent-right: #f1e4d0;
+  --accent-right-ink: #6a4718;
+  --good: #0a7e3a;
+  --good-soft: #dcf7e1;
+  --warn: #8a5400;
+  --warn-soft: #ffefcd;
+  --bad: #be222a;
+  --bad-soft: #ffe5e3;
+  --focus: #0086a4;
+  --chain-monad: #836ef9;
+  --chain-hyper: #3fbfa3;
+  --chart-line: var(--brand);
+  --seg-on: var(--surface);
+  --shadow-card: 0 1px 2px oklch(20% 0.02 215 / 0.06), 0 12px 32px -12px oklch(20% 0.02 215 / 0.18);
+  --shadow-whisper: 0 1px 2px oklch(20% 0.02 215 / 0.1), 0 0 0 1px oklch(20% 0.02 215 / 0.04);
+  --shadow-overlay: 0 24px 64px -16px oklch(20% 0.02 215 / 0.35);
+  --backdrop: oklch(12% 0.02 215 / 0.4);
+
+  --radius-card: 20px;
+  --radius-modal: 24px;
+  --radius-control: 12px;
+  --radius-pill: 999px;
+
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --space-6: 32px;
+  --space-7: 48px;
+  --space-8: 64px;
+
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-in: cubic-bezier(0.7, 0, 0.84, 0);
+  --dur-press: 100ms;
+  --dur-swap: 120ms;
+  --dur-open: 240ms;
+  --dur-close: 160ms;
+
+  --z-sticky: 100;
+  --z-dropdown: 200;
+  --z-drawer: 300;
+  --z-modal: 400;
+  --z-toast: 500;
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --canvas: #060c0e;
+  --surface: #0f181a;
+  --surface-2: #182225;
+  --well: #091113;
+  --line: #263032;
+  --line-strong: #444f53;
+  --ink: #eaf0f1;
+  --ink-2: #a3adaf;
+  --ink-3: #8a9698;
+  --brand: #5fb3c4;
+  --brand-hover: #6cc7d7;
+  --brand-soft: #092c31;
+  --brand-ink: #8ad9e7;
+  --on-brand: #060c0e;
+  --accent-right: #3a2e1e;
+  --accent-right-ink: #ecc98f;
+  --good: #76cf8a;
+  --good-soft: #15291a;
+  --warn: #f0ba59;
+  --warn-soft: #332710;
+  --bad: #ff847c;
+  --bad-soft: #3e1e1e;
+  --focus: #4dc3dd;
+  --chain-hyper: #97fce4;
+  --seg-on: #2a3639;
+  --shadow-card: 0 0 0 1px oklch(100% 0 0 / 0.06), 0 12px 32px -12px oklch(0% 0 0 / 0.6);
+  --shadow-whisper: 0 0 0 1px oklch(100% 0 0 / 0.08);
+  --shadow-overlay: 0 0 0 1px oklch(100% 0 0 / 0.07), 0 24px 64px -16px oklch(0% 0 0 / 0.7);
+  --backdrop: oklch(4% 0.01 215 / 0.6);
+}
+
+/* No JS yet (or the script failed): follow the system. Same values as [data-theme="dark"]. */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --canvas: #060c0e;
+    --surface: #0f181a;
+    --surface-2: #182225;
+    --well: #091113;
+    --line: #263032;
+    --line-strong: #444f53;
+    --ink: #eaf0f1;
+    --ink-2: #a3adaf;
+    --ink-3: #8a9698;
+    --brand: #5fb3c4;
+    --brand-hover: #6cc7d7;
+    --brand-soft: #092c31;
+    --brand-ink: #8ad9e7;
+    --on-brand: #060c0e;
+    --accent-right: #3a2e1e;
+    --accent-right-ink: #ecc98f;
+    --good: #76cf8a;
+    --good-soft: #15291a;
+    --warn: #f0ba59;
+    --warn-soft: #332710;
+    --bad: #ff847c;
+    --bad-soft: #3e1e1e;
+    --focus: #4dc3dd;
+    --chain-hyper: #97fce4;
+    --seg-on: #2a3639;
+    --shadow-card: 0 0 0 1px oklch(100% 0 0 / 0.06), 0 12px 32px -12px oklch(0% 0 0 / 0.6);
+    --shadow-whisper: 0 0 0 1px oklch(100% 0 0 / 0.08);
+    --shadow-overlay: 0 0 0 1px oklch(100% 0 0 / 0.07), 0 24px 64px -16px oklch(0% 0 0 / 0.7);
+    --backdrop: oklch(4% 0.01 215 / 0.6);
+  }
+}
+
+@theme inline {
+  --color-canvas: var(--canvas);
+  --color-surface: var(--surface);
+  --color-surface-2: var(--surface-2);
+  --color-well: var(--well);
+  --color-line: var(--line);
+  --color-line-strong: var(--line-strong);
+  --color-ink: var(--ink);
+  --color-ink-2: var(--ink-2);
+  --color-ink-3: var(--ink-3);
+  --color-brand: var(--brand);
+  --color-brand-hover: var(--brand-hover);
+  --color-brand-soft: var(--brand-soft);
+  --color-brand-ink: var(--brand-ink);
+  --color-on-brand: var(--on-brand);
+  --color-accent-right: var(--accent-right);
+  --color-accent-right-ink: var(--accent-right-ink);
+  --color-good: var(--good);
+  --color-good-soft: var(--good-soft);
+  --color-warn: var(--warn);
+  --color-warn-soft: var(--warn-soft);
+  --color-bad: var(--bad);
+  --color-bad-soft: var(--bad-soft);
+  --color-focus: var(--focus);
+  --font-sans: var(--font-geist), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-geist-mono), ui-monospace, SFMono-Regular, monospace;
+  --font-pixel: var(--font-pixel-src), var(--font-geist-mono), monospace;
+  --radius-card: var(--radius-card);
+  --radius-modal: var(--radius-modal);
+  --radius-control: var(--radius-control);
+  --shadow-card: var(--shadow-card);
+  --shadow-whisper: var(--shadow-whisper);
+  --shadow-overlay: var(--shadow-overlay);
+}
+
+/* One closed type scale: size and line-height travel together (FRONTEND_V3 §7.3). No arbitrary px sizes. */
+@theme {
+  --text-label: 12px;
+  --text-label--line-height: 16px;
+  --text-caption: 13px;
+  --text-caption--line-height: 18px;
+  --text-body-sm: 14px;
+  --text-body-sm--line-height: 20px;
+  --text-body: 16px;
+  --text-body--line-height: 24px;
+  --text-title: 20px;
+  --text-title--line-height: 26px;
+  --text-amount: 28px;
+  --text-amount--line-height: 32px;
+  --text-display: 36px;
+  --text-display--line-height: 40px;
+}
+/* Tailwind's default `hover:` variant is already guarded by @media (hover: hover); component rules below are too. */
+
+@layer base {
+  html,
+  body {
+    overflow-x: clip;
+  }
+  html {
+    -webkit-text-size-adjust: 100%;
+    background: var(--canvas);
+  }
+  body {
+    min-height: 100dvh;
+    background: var(--canvas);
+    color: var(--ink);
+    font-family: var(--font-sans);
+    font-size: 16px;
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+    -webkit-tap-highlight-color: transparent;
+    overflow-wrap: break-word;
+  }
+  h1,
+  h2,
+  h3 {
+    font-style: normal;
+    min-width: 0;
+    text-wrap: balance;
+  }
+  h1 {
+    letter-spacing: -0.02em;
+  }
+  p {
+    text-wrap: pretty;
+  }
+  html:has(dialog.overlay[open]) {
+    overflow: hidden;
+  }
+  :focus-visible {
+    outline: 2px solid var(--focus);
+    outline-offset: 2px;
+  }
+  .btn-primary:focus-visible {
+    box-shadow: 0 0 0 2px var(--surface);
+  }
+  ::selection {
+    background: var(--brand-soft);
+    color: var(--brand-ink);
+  }
+  button {
+    cursor: pointer;
+  }
+  button:disabled {
+    cursor: not-allowed;
+  }
+  input::-webkit-outer-spin-button,
+  input::-webkit-inner-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+  }
+  dialog {
+    color: var(--ink);
+  }
+}
+
+@layer components {
+  .num {
+    font-variant-numeric: tabular-nums;
+    letter-spacing: -0.01em;
+    white-space: nowrap;
+  }
+  .mono {
+    font-family: var(--font-mono);
+    font-size: 13px;
+    overflow-wrap: anywhere;
+  }
+
+  /* Card: surface + two shadows, no border (dark mode lifts with a 1 px inner ring inside the token). */
+  .card {
+    background: var(--surface);
+    border-radius: var(--radius-card);
+    box-shadow: var(--shadow-card);
+  }
+  /* Well: the one filled layer allowed inside a card. */
+  .well {
+    background: var(--well);
+    border-radius: var(--radius-control);
+  }
+
+  /* Buttons: one geometry per size, colour changes on hover, a press, an instant focus ring. */
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    border-radius: var(--radius-control);
+    font-weight: 500;
+    white-space: nowrap;
+    user-select: none;
+    transition:
+      background-color var(--dur-swap) var(--ease-out),
+      color var(--dur-swap) var(--ease-out),
+      box-shadow var(--dur-swap) var(--ease-out),
+      transform var(--dur-press) var(--ease-out);
+  }
+  .btn:active:not(:disabled) {
+    transform: scale(0.985);
+  }
+  .btn:disabled {
+    opacity: 0.5;
+  }
+  .btn-primary:disabled {
+    opacity: 1;
+    background: var(--surface-2);
+    color: var(--ink-3);
+  }
+  .btn-primary[data-loading="true"] {
+    background: var(--brand);
+    color: var(--on-brand);
+  }
+  .btn[data-loading="true"] {
+    opacity: 1;
+    cursor: progress;
+  }
+  .btn-lg {
+    height: 52px;
+    padding: 0 20px;
+    font-size: 16px;
+  }
+  .btn-md {
+    height: 40px;
+    padding: 0 16px;
+    font-size: 14px;
+  }
+  .btn-sm {
+    height: 36px;
+    padding: 0 14px;
+    font-size: 14px;
+  }
+  .btn-primary {
+    background: var(--brand);
+    color: var(--on-brand);
+  }
+  .btn-secondary {
+    background: var(--surface-2);
+    color: var(--ink);
+  }
+  .btn-soft {
+    background: var(--brand-soft);
+    color: var(--brand-ink);
+  }
+  .btn-quiet {
+    background: transparent;
+    color: var(--ink-2);
+  }
+  .btn-danger {
+    background: var(--surface);
+    color: var(--bad);
+    box-shadow: inset 0 0 0 1px var(--line-strong);
+  }
+  .btn-icon {
+    width: 40px;
+    height: 40px;
+    padding: 0;
+    border-radius: var(--radius-control);
+    color: var(--ink-2);
+  }
+
+  .link {
+    color: var(--brand);
+    text-underline-offset: 3px;
+  }
+  .textbtn {
+    color: var(--ink-2);
+    text-underline-offset: 3px;
+  }
+
+  /* Chips and segmented controls. */
+  .chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    height: 36px;
+    padding: 0 14px;
+    border-radius: var(--radius-pill);
+    background: var(--surface-2);
+    color: var(--ink);
+    font-size: 14px;
+    font-weight: 500;
+    white-space: nowrap;
+    flex: none;
+    transition:
+      background-color var(--dur-swap) var(--ease-out),
+      box-shadow var(--dur-swap) var(--ease-out),
+      transform var(--dur-press) var(--ease-out);
+  }
+  .chip:active {
+    transform: scale(0.985);
+  }
+  .chip[aria-pressed="true"],
+  .chip[aria-checked="true"] {
+    background: var(--brand-soft);
+    color: var(--brand-ink);
+  }
+  .seg {
+    display: flex;
+    padding: 4px;
+    gap: 4px;
+    border-radius: var(--radius-pill);
+    background: var(--surface-2);
+  }
+  .seg > button {
+    flex: 1 1 auto;
+    min-width: 0;
+    height: 32px;
+    padding: 0 12px;
+    border-radius: var(--radius-pill);
+    color: var(--ink-2);
+    font-size: 14px;
+    font-weight: 500;
+    transition:
+      background-color var(--dur-swap) var(--ease-out),
+      color var(--dur-swap) var(--ease-out);
+  }
+  .seg > button[aria-checked="true"] {
+    background: var(--seg-on);
+    color: var(--ink);
+    box-shadow: var(--shadow-whisper);
+  }
+
+  /* Rows of lists: no cards, a line between rows, the whole row responds. */
+  .row {
+    transition: background-color var(--dur-swap) var(--ease-out);
+  }
+  .row + .row {
+    box-shadow: inset 0 1px 0 var(--line);
+  }
+
+  /* Skeleton: same shape as the final layout, low shimmer; static with reduced motion. */
+  .skeleton {
+    border-radius: 8px;
+    background: var(--surface-2);
+    background-image: linear-gradient(90deg, transparent, color-mix(in oklch, var(--surface), transparent 40%), transparent);
+    background-size: 200% 100%;
+    animation: shimmer 1.6s linear infinite;
+  }
+  @keyframes shimmer {
+    from {
+      background-position: 150% 0;
+    }
+    to {
+      background-position: -50% 0;
+    }
+  }
+
+  .spin {
+    animation: spin 0.9s linear infinite;
+  }
+  @keyframes spin {
+    to {
+      transform: rotate(360deg);
+    }
+  }
+
+  /* Number swap: the old value fades out, the new one fades in. */
+  .swap {
+    animation: swap-in var(--dur-swap) var(--ease-out);
+  }
+  @keyframes swap-in {
+    from {
+      opacity: 0;
+    }
+  }
+
+  /* Overlays: <dialog> panels. Drawer slides from the right (>= 1024) or up from the bottom; modal fades and lifts. */
+  dialog.overlay {
+    margin: 0;
+    padding: 0;
+    border: 0;
+    max-width: none;
+    max-height: none;
+    background: transparent;
+    overflow: visible;
+  }
+  dialog.overlay::backdrop {
+    background: var(--backdrop);
+    transition: opacity var(--dur-open) var(--ease-out);
+    opacity: 1;
+  }
+  dialog.overlay[data-closing]::backdrop {
+    opacity: 0;
+    transition-duration: var(--dur-close);
+    transition-timing-function: var(--ease-in);
+  }
+  .drawer-panel {
+    position: fixed;
+    background: var(--surface);
+    box-shadow: var(--shadow-overlay);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    transition: transform var(--dur-open) var(--ease-out), opacity var(--dur-open) var(--ease-out);
+    inset: auto 0 0 0;
+    max-height: 92dvh;
+    border-radius: var(--radius-card) var(--radius-card) 0 0;
+    transform: translateY(0);
+  }
+  dialog[data-closing] .drawer-panel {
+    transform: translateY(100%);
+    transition-duration: var(--dur-close);
+    transition-timing-function: var(--ease-in);
+  }
+  @media (min-width: 1024px) {
+    .drawer-panel {
+      inset: 8px 8px 8px auto;
+      width: var(--drawer-w, 440px);
+      max-width: calc(100vw - 16px);
+      max-height: none;
+      border-radius: var(--radius-card);
+    }
+    dialog[data-closing] .drawer-panel {
+      transform: translateX(calc(100% + 16px));
+    }
+  }
+  .modal-panel {
+    position: fixed;
+    left: 50%;
+    top: 50%;
+    width: min(var(--modal-w, 440px), calc(100vw - 32px));
+    max-height: calc(100dvh - 32px);
+    overflow: auto;
+    background: var(--surface);
+    border-radius: var(--radius-modal);
+    box-shadow: var(--shadow-overlay);
+    transform: translate(-50%, -50%);
+    transition: transform var(--dur-open) var(--ease-out), opacity var(--dur-open) var(--ease-out);
+  }
+  dialog[data-closing] .modal-panel {
+    opacity: 0;
+    transform: translate(-50%, calc(-50% + 12px));
+    transition-duration: var(--dur-close);
+    transition-timing-function: var(--ease-in);
+  }
+  @media (max-width: 1023px) {
+    .modal-panel,
+    dialog[data-closing] .modal-panel {
+      left: 0;
+      right: 0;
+      top: auto;
+      bottom: 0;
+      width: 100%;
+      max-height: 92dvh;
+      border-radius: var(--radius-card) var(--radius-card) 0 0;
+      transform: translateY(0);
+      padding-bottom: env(safe-area-inset-bottom);
+    }
+    dialog[data-closing] .modal-panel {
+      opacity: 1;
+      transform: translateY(100%);
+    }
+  }
+  @starting-style {
+    dialog.overlay[open]::backdrop {
+      opacity: 0;
+    }
+    .drawer-panel {
+      transform: translateY(100%);
+    }
+    .modal-panel {
+      opacity: 0;
+      transform: translate(-50%, calc(-50% + 12px));
+    }
+  }
+  @media (max-width: 1023px) {
+    @starting-style {
+      .modal-panel {
+        opacity: 1;
+        transform: translateY(100%);
+      }
+    }
+  }
+  @media (min-width: 1024px) {
+    @starting-style {
+      .drawer-panel {
+        transform: translateX(calc(100% + 16px));
+      }
+    }
+  }
+
+  .menu {
+    position: absolute;
+    z-index: var(--z-dropdown);
+    min-width: 220px;
+    padding: 6px;
+    background: var(--surface);
+    border-radius: var(--radius-control);
+    box-shadow: var(--shadow-overlay);
+    animation: menu-in 160ms var(--ease-out);
+  }
+  @keyframes menu-in {
+    from {
+      opacity: 0;
+      transform: translateY(-4px);
+    }
+  }
+  .menu-item {
+    display: flex;
+    width: 100%;
+    align-items: center;
+    gap: 10px;
+    min-height: 40px;
+    padding: 8px 10px;
+    border-radius: 8px;
+    font-size: 14px;
+    color: var(--ink);
+    text-align: left;
+  }
+  .menu-item:hover,
+  .menu-item:focus-visible {
+    background: var(--surface-2);
+  }
+
+  .scroll-x {
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+  .scroll-x::-webkit-scrollbar {
+    display: none;
+  }
+
+  .pb-safe {
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+
+  /* Sticky action area at the bottom of a drawer: error line, primary button, steps. */
+  .drawer-footer {
+    box-shadow: 0 -1px 0 var(--line);
+    padding-bottom: max(24px, env(safe-area-inset-bottom));
+  }
+
+  /* Touch: every control at least 44 px tall. */
+  @media (pointer: coarse) {
+    .btn-sm,
+    .btn-md,
+    .chip,
+    .menu-item {
+      min-height: 44px;
+    }
+    .seg > button {
+      height: 40px;
+    }
+  }
+
+  @media (hover: hover) {
+    .btn-primary:hover:not(:disabled) {
+      background: var(--brand-hover);
+    }
+    .btn-quiet:hover:not(:disabled) {
+      background: var(--surface-2);
+      color: var(--ink);
+    }
+    .btn-danger:hover:not(:disabled) {
+      background: var(--bad-soft);
+    }
+    .btn-icon:hover:not(:disabled) {
+      background: var(--surface-2);
+      color: var(--ink);
+    }
+    .link:hover {
+      text-decoration: underline;
+    }
+    .textbtn:hover {
+      color: var(--ink);
+      text-decoration: underline;
+    }
+    .chip:hover {
+      background: color-mix(in oklch, var(--surface-2), var(--ink) 6%);
+    }
+    .seg > button:hover {
+      color: var(--ink);
+    }
+    .row-hover:hover {
+      background: var(--surface-2);
+    }
+    .btn-secondary:hover:not(:disabled) {
+      background: color-mix(in oklch, var(--surface-2), var(--ink) 6%);
+    }
+    .btn-soft:hover:not(:disabled) {
+      background: color-mix(in oklch, var(--brand-soft), var(--brand) 12%);
+    }
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+  }
+  .btn:active:not(:disabled),
+  .chip:active {
+    transform: none;
+  }
+  .skeleton {
+    animation: none;
+    background-image: none;
+  }
+  .drawer-panel,
+  .modal-panel,
+  dialog[data-closing] .drawer-panel,
+  dialog[data-closing] .modal-panel {
+    transform: none;
+    transition: opacity 150ms linear;
+  }
+  @media (min-width: 1024px) {
+    dialog[data-closing] .drawer-panel {
+      transform: none;
+    }
+  }
+  dialog[data-closing] .drawer-panel {
+    opacity: 0;
+  }
+  @media (min-width: 1024px) {
+    .modal-panel,
+    dialog[data-closing] .modal-panel {
+      transform: translate(-50%, -50%);
+    }
+  }
+  @starting-style {
+    .drawer-panel,
+    .modal-panel {
+      opacity: 0;
+    }
+  }
+}
