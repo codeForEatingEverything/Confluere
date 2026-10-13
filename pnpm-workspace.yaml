@@ -1,0 +1,9 @@
+packages:
+  - apps/*
+  - services/*
+  - packages/*
+allowBuilds:
+  esbuild: true
+  sharp: false
+  unrs-resolver: false
+  '@reown/appkit': false
