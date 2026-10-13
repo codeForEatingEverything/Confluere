@@ -101,7 +101,7 @@ describe("live testnets (fixtures shaped like the deployments)", () => {
     const { native: W, usdc: U } = launchTokensOf(998);
     // three WHYPE / USDC pools (both styles) and two USDC / WHYPE pools
     const pools = [pool(1, W!, U!), pool(2, W!, U!), pool(3, W!, U!, Kind.European), pool(4, U!, W!), pool(5, U!, W!)];
-    const v = deployments[998]!.vaults!;
+    const v = deployments[998]!.vaults ?? { pegged: "0x00000000000000000000000000000000000000f0", usdLow: "0x00000000000000000000000000000000000000f1", usdHigh: "0x00000000000000000000000000000000000000f2", nativeLend: "0x00000000000000000000000000000000000000f3" }; // fixed stand-ins before the live vaults exist
     const vaults = [
       { address: v.usdLow, quote: U! },
       { address: v.usdHigh!, quote: U! },
@@ -115,7 +115,7 @@ describe("live testnets (fixtures shaped like the deployments)", () => {
   it("Monad: MON / USDC + WMON / USDC and shMON / MON + shMON / WMON on every page", () => {
     const { native: W, usdc: U, lst: L } = launchTokensOf(10143);
     const pools = [pool(1, W!, U!), pool(2, W!, U!, Kind.European), pool(3, L!, W!, Kind.American, 150)];
-    const v = deployments[10143]!.vaults!;
+    const v = deployments[10143]!.vaults ?? { pegged: "0x00000000000000000000000000000000000000f4", usdLow: "0x00000000000000000000000000000000000000f5", usdHigh: "0x00000000000000000000000000000000000000f6" }; // fixed stand-ins before the live vaults exist
     const vaults = [{ address: v.usdLow, quote: U! }, ...(v.usdHigh ? [{ address: v.usdHigh, quote: U! }] : []), ...(v.pegged ? [{ address: v.pegged, quote: W! }] : [])];
     const all = ["MON / USDC", "WMON / USDC", "shMON / MON", "shMON / WMON"];
     const c = check(10143, pools, vaults, { Borrow: all, Markets: all, LP: all, Loop: all });

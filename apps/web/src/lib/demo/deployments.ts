@@ -19,6 +19,18 @@ export const DEMO_ADDR = {
   lpKhypeUsdcEu998: "0xd3a0000000000000000000000000000000000c05",
   lpShmonUsdcAm10143: "0xd3a0000000000000000000000000000000000c06",
   lpShmonUsdcEu10143: "0xd3a0000000000000000000000000000000000c07",
+  // the demo owns every vault and LP token address, so it never depends on what the live deployment has created yet
+  usdLowVault998: "0xd3a0000000000000000000000000000000000b03",
+  usdHighVault998: "0xd3a0000000000000000000000000000000000b04",
+  peggedVault10143: "0xd3a0000000000000000000000000000000000b05",
+  usdLowVault10143: "0xd3a0000000000000000000000000000000000b06",
+  usdHighVault10143: "0xd3a0000000000000000000000000000000000b07",
+  lpHypeUsdcAm998: "0xd3a0000000000000000000000000000000000c08",
+  lpHypeUsdcEu998: "0xd3a0000000000000000000000000000000000c09",
+  lpShmonMonAm10143: "0xd3a0000000000000000000000000000000000c0a",
+  lpShmonMonEu10143: "0xd3a0000000000000000000000000000000000c0b",
+  lpMonUsdcAm10143: "0xd3a0000000000000000000000000000000000c0c",
+  lpMonUsdcEu10143: "0xd3a0000000000000000000000000000000000c0d",
 } as const satisfies Record<string, Address>;
 
 /** Daily maturities at 08:00 UTC, one round a minute. */
@@ -35,9 +47,10 @@ function hyper(): Deployment {
     gridPeriod: DEMO_GRID.period,
     batchInterval: DEMO_GRID.batchInterval,
     pools: { ...d.pools!, lst: DEMO_ADDR.khype, poolIds: [] },
-    vaults: { ...d.vaults!, pegged: DEMO_ADDR.peggedVault998, nativeLend: DEMO_ADDR.nativeLendVault998 },
+    vaults: { pegged: DEMO_ADDR.peggedVault998, nativeLend: DEMO_ADDR.nativeLendVault998, usdLow: DEMO_ADDR.usdLowVault998, usdHigh: DEMO_ADDR.usdHighVault998 },
     seatLPTokens: {
-      ...d.seatLPTokens,
+      [`${d.pools!.native}-${d.pools!.usdc}-0`]: DEMO_ADDR.lpHypeUsdcAm998,
+      [`${d.pools!.native}-${d.pools!.usdc}-1`]: DEMO_ADDR.lpHypeUsdcEu998,
       [`${DEMO_ADDR.khype}-${d.pools!.native}-0`]: DEMO_ADDR.lpKhype998,
       [`${d.pools!.usdc}-${d.pools!.native}-0`]: DEMO_ADDR.lpUsdcHypeAm998,
       [`${d.pools!.usdc}-${d.pools!.native}-1`]: DEMO_ADDR.lpUsdcHypeEu998,
@@ -56,8 +69,12 @@ function monad(): Deployment {
     gridPeriod: DEMO_GRID.period,
     batchInterval: DEMO_GRID.batchInterval,
     pools: { ...d.pools!, poolIds: [] },
+    vaults: { pegged: DEMO_ADDR.peggedVault10143, usdLow: DEMO_ADDR.usdLowVault10143, usdHigh: DEMO_ADDR.usdHighVault10143 },
     seatLPTokens: {
-      ...d.seatLPTokens,
+      [`${d.pools!.lst}-${d.pools!.native}-0`]: DEMO_ADDR.lpShmonMonAm10143,
+      [`${d.pools!.lst}-${d.pools!.native}-1`]: DEMO_ADDR.lpShmonMonEu10143,
+      [`${d.pools!.native}-${d.pools!.usdc}-0`]: DEMO_ADDR.lpMonUsdcAm10143,
+      [`${d.pools!.native}-${d.pools!.usdc}-1`]: DEMO_ADDR.lpMonUsdcEu10143,
       [`${d.pools!.lst}-${d.pools!.usdc}-0`]: DEMO_ADDR.lpShmonUsdcAm10143,
       [`${d.pools!.lst}-${d.pools!.usdc}-1`]: DEMO_ADDR.lpShmonUsdcEu10143,
     },
