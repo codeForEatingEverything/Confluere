@@ -1,0 +1,38 @@
+node_modules/
+dist/
+.next/
+.turbo/
+.env
+.env.*
+!.env.example
+contracts/out/
+contracts/cache/
+contracts/broadcast/*/31337/
+deployments/anvil.json
+*.log
+.DS_Store
+contracts/out-halmos/
+services/keeper-cre/dist/
+**/.cre_build_tmp.js
+contracts/cache-halmos/
+contracts/.env
+contracts/medusa-corpus/
+services/bootstrap-mm/bootstrap-mm-state*.json
+contracts/out-medusa/
+
+# encrypted deployer keystore password (scripts pass the path via ETH_PASSWORD)
+contracts/.keystore-password
+
+# local tooling and research, not part of the product
+.agents/
+.claude/
+skills-lock.json
+Discussions/
+# per-run Foundry receipts (deployed addresses live in deployments/)
+contracts/broadcast/
+# internal design docs and the assistant guide stay local
+docs/
+CLAUDE.md
+# every markdown doc except the root README stays local
+**/*.md
+!/README.md
