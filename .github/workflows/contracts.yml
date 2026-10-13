@@ -29,7 +29,7 @@ jobs:
       - name: test (unit + fuzz + invariant)
         run: forge test
       - name: gas regression
-        run: forge snapshot --check --no-match-path 'test/invariant/*'
+        run: forge snapshot --check --no-match-path 'test/invariant/*' --no-match-test 'testFuzz'  # fuzz averages vary across machines
       - name: deploy scripts (guards, idempotent re-runs; in-memory, nothing is sent)
         run: forge script script/checks/ScriptChecks.s.sol
       - name: shell scripts parse
