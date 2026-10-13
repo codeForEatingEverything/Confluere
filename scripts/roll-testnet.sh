@@ -14,8 +14,9 @@
 #      (the funds come back for the next seed; pools not Closed yet are retried on the next run),
 #   2. fund: checks balances against one seed and stops before creating anything if they fall short,
 #   3. pools: CreatePools on the next expiry with the real tokens recorded in deployments/<chain>.json .pools,
-#   4. seed: SEED_UNIT_BPS, default 100 = 0.01 asset per unit, the extra pair at EXTRA_SEED_UNIT_BPS (pools already
-#      seeded this batch are skipped),
+#   4. seed: a two-sided book in every new pool at the chain's seed units (scripts/lib/testnet.sh: SEED_UNIT_BPS,
+#      LST_SEED_UNIT_BPS, EXTRA_SEED_UNIT_BPS; pools already seeded are skipped), then trade: TRADE_ROUNDS rounds of
+#      small crossing trades, one batch apart,
 #   5. sync: regenerates the SDK addresses and, on Monad, the CRE workflow config (pnpm sync-config: receiver, vaults
 #      and every pool that is not Closed, so maturing and closing the earlier expiries stays in the CRE tick).
 # The optional step starts from there (after a failure). RESUME=1 resumes only that first step's interrupted broadcast;
@@ -30,10 +31,10 @@ set -a; . ./.env; set +a
 testnet_env "${1:-}" || { echo "usage: $0 monad|hyperevm [collect|fund|pools|seed|sync]"; exit 1; }
 [ -f "$J" ] && [ -n "$(jget "$J" pools.native)" ] || { echo "no pools in deployments/$NAME.json: run scripts/deploy-testnet.sh $CHAIN first"; exit 1; }
 FROM=${2:-collect}
-steps=(collect fund pools seed sync)
+steps=(collect fund pools seed trade sync)
 started=0
 for st in "${steps[@]}"; do [ "$st" = "$FROM" ] && started=1; done
-[ $started = 1 ] || { echo "unknown step $FROM (collect | fund | pools | seed | sync)"; exit 1; }
+[ $started = 1 ] || { echo "unknown step $FROM (collect | fund | pools | seed | trade | sync)"; exit 1; }
 
 # The real tokens this deployment was opened with (deployments/<chain>.json .pools), not the defaults.
 LST=$(jget "$J" pools.lst); NATIVE=$(jget "$J" pools.native); USDC=$(jget "$J" pools.usdc)
@@ -42,8 +43,9 @@ export LST NATIVE USDC
 # scripts/lib/testnet.sh (HyperEVM: USDC/WHYPE; Monad: none), so a roll can add the pair to a running deployment.
 XA=$(jget "$J" pools.extraAsset)
 if [ -n "$XA" ]; then EXTRA_ASSET=$XA; EXTRA_QUOTE=$(jget "$J" pools.extraQuote); export EXTRA_ASSET EXTRA_QUOTE; fi
-export SEED_UNIT_BPS=${SEED_UNIT_BPS:-100}
 CORE=$(jget "$J" confluere)
+SEED_ROUTER=$(jget "$J" router) # Seed.s.sol batches the orders through the Router (fewer transactions)
+if [ -n "$SEED_ROUTER" ]; then export SEED_ROUTER; else unset SEED_ROUTER; fi
 
 STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/confluere"
 mkdir -p "$STATE_DIR"
@@ -134,9 +136,11 @@ for st in "${steps[@]}"; do
       unset EXPIRY
       remember_pools
       count_chain ;;
-    seed) run "seed small two-sided books" script/Seed.s.sol 0 ;;
+    seed) run "seed two-sided books" script/Seed.s.sol 0 ;;
+    trade) trade_rounds ;;
     sync) sync_offchain ;;
   esac
   unset RESUME # only the first step resumes
+  [ "${UNTIL:-}" != "$st" ] || break # UNTIL=<step> stops after that step (UNTIL=collect: recover funds only)
 done
 echo; echo "rolled: deployments/$NAME.json now lists expiry $(jget "$J" pools.expiry)"

@@ -113,6 +113,7 @@ echo "sleep $*" >> "$CALLS"
 EOF
 chmod +x "$T/bin/"*
 export PATH="$T/bin:$PATH" RETRY_SLEEP=0 PRIVATE_KEY=0x01 FAKE_BAL=1000000000000000000000 FAKE_GAS=10000000000000000000
+export TRADE_ROUNDS=0 # the trade step has its own case below; the step sequences leave it out
 
 fail() { echo "FAIL: $*"; [ -f "$T/out" ] && sed 's/^/  | /' "$T/out"; exit 1; }
 # The call log condensed to the steps that matter, consecutive repeats folded:
@@ -235,30 +236,45 @@ rm -rf "$DEP/.staging"
 if lib 'bigblocks on; exit 1' > "$T/out" 2>&1; then :; fi
 expect_seq "bb-on bb-off" "big blocks after a failed step"
 
-# preflight: stops with a clear message before any pool when balances fall short (WHYPE/USDC at 1% units:
-# 24 x 0.01 WHYPE sold, 2 x 5.9 x 0.01 x (34 + 35) USDC bought ≈ 8.2 USDC)
+# preflight: stops with a clear message before any pool when balances fall short
 if FAKE_BAL=1000 lib 'preflight' > "$T/out" 2>&1; then fail "preflight passed when short"; fi
 grep -q "STOP: balances do not cover one seed" "$T/out" || fail "no stop message"
 grep -q "faucet.circle.com" "$T/out" || fail "no USDC hint"
-lib 'preflight' > "$T/out" 2>&1 || fail "preflight failed when funded"
-# HyperEVM adds the extra pair USDC/WHYPE at 0.32 USDC units (EXTRA_SEED_UNIT_BPS=3200, strikes 0.028 / 0.030 WHYPE):
-# USDC = the WHYPE/USDC buys' 6136576 (strikes 25 / 27 USDC) + 24 x 320000 sold; WHYPE = 24 x 0.01 sold + the USDC/WHYPE buys' escrow
-# (2 kinds x (52864e12 + 56640e12 + 6 x 48 wei of ttl)) = 0.24e18 + 219008e12 + 576
-grep -qE "usdc +need 13816576 " "$T/out" || fail "HyperEVM USDC need misses the extra pair: $(grep usdc "$T/out")"
-grep -qE "native +need 459008000000000576 " "$T/out" || fail "HyperEVM WHYPE need misses the extra pair: $(grep native "$T/out")"
+TRADE_ROUNDS=3 lib 'preflight' > "$T/out" 2>&1 || fail "preflight failed when funded"
+# Book layout (SEED_APR_BPS=1000) at one strike per pair, one expiry, 3 trade rounds: per pool and kind 5 sells and 5
+# buys of one unit, each buy escrowing quoteUp(u x K) + ttl (SEED_TTL=1000). HyperEVM: WHYPE/USDC at 0.001 WHYPE,
+# K 75 USDC: 10 x (75000 + 1000) USDC and 10 x 1e15 WHYPE; the extra pair USDC/WHYPE at 0.2 USDC, K 0.011 WHYPE:
+# 10 x 200000 USDC and 10 x (2.2e15 + 1000) WHYPE
+grep -qE "usdc +need 2760000 " "$T/out" || fail "HyperEVM USDC need misses the extra pair: $(grep usdc "$T/out")"
+grep -qE "native +need 32000000000010000 " "$T/out" || fail "HyperEVM WHYPE need misses the extra pair: $(grep native "$T/out")"
 grep -qE "^  extra" "$T/out" && fail "the extra pair's tokens (USDC, WHYPE) were counted as separate tokens"
-if FAKE_BAL_USDC=13816575 lib 'preflight' > "$T/out" 2>&1; then fail "preflight passed 1 unit short of the extra pair's USDC"; fi
+if TRADE_ROUNDS=3 FAKE_BAL_USDC=2759999 lib 'preflight' > "$T/out" 2>&1; then fail "preflight passed 1 unit short of the extra pair's USDC"; fi
 grep -q "faucet.circle.com" "$T/out" || fail "no USDC hint when only the extra pair is short"
-# the USDC need is what the seed's buys escrow (OrderLogic BUY: quoteUp(units * limit) + ttl per order). Monad at 1%
-# units, strikes 0.025 / 0.026 USDC: per kind 1476 + 1536 rounded up per order, plus 6 x 48 wei of ttl; x 2 kinds =
-# 6600, plus the extra pair shMON/USDC's buys (0.48% units, strikes 0.021 / 0.023 USDC) = 9674. Just below that must
-# stop (the seed would revert halfway); exactly that passes.
-if LIBCHAIN=monad FAKE_BAL_USDC=9673 lib 'preflight' > "$T/out" 2>&1; then fail "preflight passed 1 wei short of the buys' escrow"; fi
-grep -qE "usdc +need 9674 " "$T/out" || fail "USDC need is not the escrow sum: $(grep usdc "$T/out")"
-LIBCHAIN=monad FAKE_BAL_USDC=9674 lib 'preflight' > "$T/out" 2>&1 || fail "preflight failed with exactly the escrow"
-# the ttl preflight counts is the one Seed.s.sol places
-grep -qE "p\.ttl = $(bash -c ". '$ROOT/scripts/lib/testnet.sh' 2>/dev/null; echo \$SEED_TTL");" "$ROOT/contracts/script/Seed.s.sol" \
-  || fail "SEED_TTL in scripts/lib/testnet.sh differs from Seed.s.sol's p.ttl"
+# Monad, USDC: WMON/USDC at 0.02 WMON, K 0.022: 10 x (440 + 1000); shMON/USDC at 0.005 shMON: 10 x (110 + 1000) = 25500.
+# Just below that must stop (the seed would revert halfway); exactly that passes. Three expiries triple it.
+if TRADE_ROUNDS=3 LIBCHAIN=monad FAKE_BAL_USDC=25499 lib 'preflight' > "$T/out" 2>&1; then fail "preflight passed 1 wei short of the buys' escrow"; fi
+grep -qE "usdc +need 25500 " "$T/out" || fail "USDC need is not the escrow sum: $(grep usdc "$T/out")"
+TRADE_ROUNDS=3 LIBCHAIN=monad FAKE_BAL_USDC=25500 lib 'preflight' > "$T/out" 2>&1 || fail "preflight failed with exactly the escrow"
+TRADE_ROUNDS=3 LIBCHAIN=monad LATER_EXPIRIES=5,6 lib 'preflight' > "$T/out" 2>&1 || true
+grep -qE "usdc +need 76500 " "$T/out" || fail "LATER_EXPIRIES not counted: $(grep usdc "$T/out")"
+# the ttl preflight counts is the one Seed.s.sol places (it reads SEED_TTL)
+grep -q 'vm.envOr("SEED_TTL"' "$ROOT/contracts/script/Seed.s.sol" || fail "Seed.s.sol does not read SEED_TTL"
+
+# launch_expiries on a daily grid: the first expiry at least 12 h away, then 6 and 13 days later
+python3 - "$DEP/hyperevm-testnet.json" <<'PY'
+import json, sys
+json.dump({"chainId": 998, "confluere": "0x00000000000000000000000000000000000000c0", "gridPeriod": 86400,
+           "gridAnchor": 1791532800, "batchInterval": 120, "deployBlock": 1}, open(sys.argv[1], "w"))
+PY
+out=$(FAKE_NOW=$((1791532800 + 10 * 86400 - 13 * 3600)) lib 'launch_expiries >/dev/null; echo "$EXPIRY $LATER_EXPIRIES"')
+[ "$out" = "$((1791532800 + 10 * 86400)) $((1791532800 + 16 * 86400)),$((1791532800 + 23 * 86400))" ] || fail "launch expiries: $out"
+out=$(FAKE_NOW=$((1791532800 + 10 * 86400 - 11 * 3600)) lib 'launch_expiries >/dev/null; echo "$EXPIRY"')
+[ "$out" = $((1791532800 + 11 * 86400)) ] || fail "launch expiry less than 12 h away: $out"
+# trade_rounds: a tick before every round (one batch apart) and a last one
+: > "$CALLS"
+FAKE_NOW=$((1791532800 + 30)) TRADE_ROUNDS=2 lib 'trade_rounds' > "$T/out" 2>&1 || fail "trade rounds failed"
+expect_seq "sleep Seed.tick Seed.trade sleep Seed.tick Seed.trade sleep Seed.tick" "trade rounds"
+grep -q "^sleep 105" "$CALLS" || fail "trade rounds: not waiting for the batch boundary"
 : > "$CALLS"
 FAKE_BAL=9000000 FUND=1 lib 'preflight' > "$T/out" 2>&1 || true
 grep -q 'cast send 0x5555555555555555555555555555555555555555 deposit()' "$CALLS" || fail "FUND=1 did not wrap"
@@ -270,11 +286,11 @@ rm -f "$DEP"/*.json
 "$SCR/deploy-testnet.sh" hyperevm > "$T/out" 2>&1 || fail "deploy-testnet.sh hyperevm failed"
 expect_seq "bb-on Deploy.run bb-off fund CreatePools.run Seed.run bb-on CreateVaults.run bb-off sdk" \
   "deploy-testnet.sh hyperevm"
-grep -q 'BPS=100' <<<"$(forge_line Seed.run)" || fail "seed not at SEED_UNIT_BPS=100"
+grep -q 'BPS=10 ' <<<"$(forge_line Seed.run)" || fail "seed not at the chain's SEED_UNIT_BPS=10"
 grep -q '"usdLow"' "$DEP/hyperevm-testnet.json" || fail "vaults not recorded"
 grep -q "EXTRA=0x2B3370eE501B4a559b57D449569354196457D8Ab XQ=0x5555555555555555555555555555555555555555 " \
   <<<"$(forge_line CreatePools.run)" || fail "HyperEVM pools without the USDC/WHYPE extra pair"
-grep -q 'XBPS=3200' <<<"$(forge_line Seed.run)" || fail "extra pair not seeded at EXTRA_SEED_UNIT_BPS=3200"
+grep -q 'XBPS=2000' <<<"$(forge_line Seed.run)" || fail "extra pair not seeded at EXTRA_SEED_UNIT_BPS=2000"
 grep -q '"nativeLend"' "$DEP/hyperevm-testnet.json" || fail "extra-pair vault not recorded as vaults.nativeLend"
 
 # Monad also regenerates the CRE workflow config (it targets monad-testnet)
@@ -333,7 +349,7 @@ FAKE_NOW=$((E0 - 1800)) "$SCR/roll-testnet.sh" monad > "$T/out" 2>&1 || fail "ro
 expect_seq "Seed.collect fund CreatePools.run Seed.run sdk cre:monad-testnet" "roll-testnet.sh monad"
 grep -q "CLAIM_POOLS=$(id_of $E0)" <<<"$(forge_line Seed.collect)" || fail "collect without the earlier pool ids"
 grep -q "EXPIRY=$((E0 + P)) NATIVE=$NAT " <<<"$(forge_line CreatePools.run)" || fail "pools: wrong expiry or tokens"
-grep -q 'BPS=100' <<<"$(forge_line Seed.run)" || fail "roll seed not at 100 bps"
+grep -q 'BPS=200 ' <<<"$(forge_line Seed.run)" || fail "roll seed not at Monad's 200 bps"
 [ "$(jexp)" = $((E0 + P)) ] || fail "deployments not rolled"
 grep -q "2 consecutive expiries" "$T/out" || fail "consecutive count not reported"
 grep -qx "$(id_of $E0)" "$T/state/confluere/roll-monad-testnet-0x00000000000000000000000000000000000000c0.txt" \
@@ -452,7 +468,7 @@ FAKE_NOW=$((E0 - 1800)) "$SCR/roll-testnet.sh" hyperevm > "$T/out" 2>&1 || fail 
 expect_seq "Seed.collect fund CreatePools.run Seed.run sdk" "roll-testnet.sh hyperevm"
 grep -q "EXTRA=0x2B3370eE501B4a559b57D449569354196457D8Ab XQ=0x5555555555555555555555555555555555555555 " \
   <<<"$(forge_line CreatePools.run)" || fail "hyperevm roll without the extra pair"
-grep -q 'BPS=100 .*XBPS=3200' <<<"$(forge_line Seed.run)" || fail "hyperevm roll seed sizes"
+grep -q 'BPS=10 .*XBPS=2000' <<<"$(forge_line Seed.run)" || fail "hyperevm roll seed sizes"
 grep -q '"extraAsset"' "$DEP/hyperevm-testnet.json" || fail "extra pair not recorded by the roll"
 XO=0x00000000000000000000000000000000000000e3 # another extra asset already recorded: the record wins over the default
 python3 - "$DEP/hyperevm-testnet.json" "$XO" <<'PY'

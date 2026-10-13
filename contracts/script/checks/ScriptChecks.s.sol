@@ -4,7 +4,7 @@ pragma solidity 0.8.37;
 import {Script, console2} from "forge-std/Script.sol";
 import {Confluere} from "../../src/Confluere.sol";
 import {IConfluere} from "../../src/interfaces/IConfluere.sol";
-import {SELL} from "../../src/libraries/OrderSet.sol";
+import {SELL, BUY} from "../../src/libraries/OrderSet.sol";
 import {Status, PoolKeyLib} from "../../src/libraries/PoolKey.sol";
 import {MockERC20} from "../../src/mocks/MockERC20.sol";
 import {Deploy} from "../Deploy.s.sol";
@@ -25,6 +25,10 @@ import {Vault} from "../../src/periphery/Vault.sol";
 ///   not listable yet.
 /// - An extra pair (EXTRA_ASSET / EXTRA_QUOTE / EXTRA_STRIKE_*) adds 2 strikes x 2 kinds after the launch pools, is
 ///   seeded at EXTRA_SEED_UNIT_BPS, and gets its own vault (`.vaults.nativeLend`); re-runs keep both.
+/// - GRID=daily (testnets and anvil only, not with DEMO): daily expiries listed 15 days ahead, production windows;
+///   CreatePools opens a single strike when both strikes are equal and adds LATER_EXPIRIES (1-, 7- and 14-day pools,
+///   no id twice); Seed with SEED_APR_BPS (through the Router) leaves a two-sided book after the seed clears, and
+///   trade() rounds clear again at a new price.
 /// - gradCovered(chainId) (scripts/test/grad-seed.test.sh passes the testnet GRAD rows, tokens and strikes of
 ///   scripts/lib/testnet.sh): one small seed at SEED_UNIT_BPS clears at least the graduation volume of every market.
 /// Output goes to deployments/.script-checks.tmp (removed at the end), never to a real deployments file.
@@ -43,6 +47,7 @@ contract ScriptChecks is Script {
         // DEMO and GUARDIAN_MEMBERS are still unset here (forge has no unsetEnv), so these two run first.
         _demoDefaultsOff();
         _guards();
+        _dailyGrid();
         _idempotentLifecycle();
 
         vm.removeFile(file);
@@ -72,6 +77,89 @@ contract ScriptChecks is Script {
         }
         vm.setEnv("MOCKS", "false");
         _expectRevert(new Deploy(), "set GRAD_10143");
+    }
+
+    function _dailyGrid() internal {
+        vm.setEnv("DEMO", "false");
+        vm.setEnv("GRID", "daily");
+        vm.chainId(999);
+        _expectRevert(new Deploy(), "daily grid: testnets and anvil only");
+        vm.setEnv("DEMO", "true");
+        vm.chainId(10_143);
+        _expectRevert(new Deploy(), "DEMO and GRID=daily are exclusive");
+        vm.setEnv("DEMO", "false");
+        vm.chainId(31_337);
+        vm.setEnv("MOCKS", "true");
+        vm.setEnv("SALT", vm.toString(bytes32(uint256(0xc0f2)))); // its own registry and core, apart from the rest
+        Confluere core = new Deploy().run();
+        require(core.grid().period == 1 days && core.grid().maxExpiries == 15, "daily grid: wrong grid");
+        require(core.grid().batchInterval == 2 minutes && core.WINDOW_BLOCKS() == 7200, "daily grid: batch / window");
+
+        uint256 e0 = core.grid().anchor + ((block.timestamp - core.grid().anchor) / 1 days + 1) * 1 days;
+        if (e0 - block.timestamp < 12 hours) e0 += 1 days;
+        vm.setEnv("EXPIRY", vm.toString(e0));
+        vm.setEnv("LATER_EXPIRIES", string.concat(vm.toString(e0 + 6 days), ",", vm.toString(e0 + 13 days)));
+        vm.setEnv("LST_STRIKE_LOW", "900000000000000000");
+        vm.setEnv("LST_STRIKE_HIGH", "900000000000000000");
+        vm.setEnv("USD_STRIKE_LOW", "22000000");
+        vm.setEnv("USD_STRIKE_HIGH", "22000000");
+        new CreatePools().run();
+        new CreatePools().run(); // idempotent
+        string memory json = vm.readFile(file);
+        bytes32[] memory ids = vm.parseJsonBytes32Array(json, ".pools.poolIds");
+        require(ids.length == 12, "daily: 2 pairs x 1 strike x 2 kinds x 3 expiries");
+        require(vm.parseJsonUint(json, ".pools.expiry") == e0, "daily: .pools.expiry is the first expiry");
+        require(vm.parseJsonUintArray(json, ".pools.expiries").length == 3, "daily: expiries not recorded");
+        for (uint256 i; i < ids.length; ++i) {
+            for (uint256 j; j < i; ++j) {
+                require(ids[i] != ids[j], "daily: pool listed twice");
+            }
+            require(core.pool(ids[i]).status == Status.Open, "daily: pool not open");
+        }
+        require(core.pool(ids[11]).key.expiry == e0 + 13 days, "daily: last pool not at the 14-day expiry");
+
+        vm.setEnv("SEED_APR_BPS", "1000");
+        vm.setEnv("SEED_UNIT_BPS", "10000");
+        vm.setEnv("SEED_TTL", "1000");
+        vm.setEnv("SEED_ROUTER", vm.toString(vm.parseJsonAddress(json, ".router")));
+        new Seed().run();
+        new Seed().run(); // skipped: already seeded
+        (, uint32 sells) = core.bookHead(ids[0], SELL);
+        require(sells == 2, "book seed: one crossing and one resting sell");
+        vm.warp(core.nextBatchAt(ids[0]));
+        new Seed().tick();
+        for (uint256 i; i < ids.length; ++i) {
+            IConfluere.PoolView memory v = core.pool(ids[i]);
+            require(
+                v.settleCount == 1 && v.lastClearingPrice != 0 && v.lastClearingPrice < v.key.strike, "book: no fill"
+            );
+            (, uint32 s1) = core.bookHead(ids[i], SELL);
+            (, uint32 b1) = core.bookHead(ids[i], BUY);
+            require(s1 == 1 && b1 == 1, "book: not two-sided after clearing");
+        }
+        uint96 p0 = core.pool(ids[11]).lastClearingPrice;
+        vm.setEnv("TRADE_ROUND", "1");
+        new Seed().trade();
+        vm.warp(core.nextBatchAt(ids[0]));
+        new Seed().tick();
+        IConfluere.PoolView memory w = core.pool(ids[11]);
+        require(w.settleCount == 2 && w.lastClearingPrice < p0, "trade: round 1 (higher rate) did not clear lower");
+        (, uint32 s2) = core.bookHead(ids[11], SELL);
+        require(s2 == 1, "trade: crossed a resting order");
+
+        vm.setEnv("GRID", "");
+        vm.setEnv("SALT", vm.toString(bytes32(uint256(0xc0f1))));
+        vm.setEnv("EXPIRY", "0");
+        vm.setEnv("LATER_EXPIRIES", "");
+        vm.setEnv("LST_STRIKE_LOW", "950000000000000000");
+        vm.setEnv("LST_STRIKE_HIGH", "980000000000000000");
+        vm.setEnv("USD_STRIKE_LOW", "20000000");
+        vm.setEnv("USD_STRIKE_HIGH", "30000000");
+        vm.setEnv("SEED_APR_BPS", "0");
+        vm.setEnv("SEED_UNIT_BPS", "10000");
+        vm.setEnv("SEED_TTL", "48");
+        vm.setEnv("SEED_ROUTER", vm.toString(address(0)));
+        vm.removeFile(file);
     }
 
     function _idempotentLifecycle() internal {
@@ -190,15 +278,16 @@ contract ScriptChecks is Script {
         vm.setEnv("EXPIRY", "0");
     }
 
-    /// @notice One seed of every launch pool (SEED_UNIT_BPS) must clear at least the graduation volume of its market
-    /// in one batch, with the GRAD_<chainId> row, tokens (LST, NATIVE, USDC) and strikes given in env. The real token
+    /// @notice One seed of every launch pool (SEED_UNIT_BPS; the book layout with SEED_APR_BPS) plus TRADE_ROUNDS
+    /// trade rounds must clear at least the graduation volume of its market on the daily grid, with the GRAD_<chainId> row, tokens (LST, NATIVE, USDC) and strikes given in env. The real token
     /// addresses get mintable stand-ins with the real decimals (18; USDC 6). In-memory, nothing is sent.
     function gradCovered(uint256 chainId) external {
         file = string.concat(vm.projectRoot(), "/../deployments/.grad-check.tmp");
         vm.setEnv("DEPLOYMENTS_FILE", file);
         vm.setEnv("TREASURY", vm.toString(address(0xBEEF)));
         vm.setEnv("GUARDIAN", vm.toString(address(0xBEEF)));
-        vm.setEnv("DEMO", "true");
+        vm.setEnv("DEMO", "false");
+        vm.setEnv("GRID", "daily");
         vm.setEnv("MOCKS", "false");
         (, me,) = vm.readCallers();
         vm.warp(vm.unixTime() / 1000);
@@ -219,6 +308,14 @@ contract ScriptChecks is Script {
         bytes32[] memory ids = vm.parseJsonBytes32Array(vm.readFile(file), ".pools.poolIds");
         vm.warp(core.nextBatchAt(ids[0]));
         new Seed().settle();
+        // the trade rounds scripts/lib/testnet.sh runs after the seed (TRADE_ROUNDS), one batch apart
+        uint256 rounds = vm.envOr("TRADE_ROUNDS", uint256(0));
+        for (uint256 r; r < rounds; ++r) {
+            vm.setEnv("TRADE_ROUND", vm.toString(r));
+            new Seed().trade();
+            vm.warp(core.nextBatchAt(ids[0]));
+            new Seed().settle();
+        }
         for (uint256 i; i < ids.length; ++i) {
             IConfluere.PoolView memory v = core.pool(ids[i]);
             uint256 threshold = core.graduationVolume(v.key.quote);

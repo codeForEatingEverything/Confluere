@@ -14,9 +14,20 @@ M_SHMON=0x282BdDFF5e58793AcAb65438b257Dbd15A8745C9
 H_WHYPE=0x5555555555555555555555555555555555555555
 H_USDC=0x2B3370eE501B4a559b57D449569354196457D8Ab
 ZERO=0x0000000000000000000000000000000000000000
+# CREATE2 salt of the testnet deployment (Deploy.s.sol SALT). The SeatRegistry's address does not depend on the grid,
+# so a redeploy with the same GRAD rows but another grid needs a new salt (the registry of the old salt is bound to the
+# old core). 0xc0f1: the 2026-10-12 demo-grid core; 0xc0f2: the 2026-10-13 daily-grid core.
+TESTNET_SALT=0x000000000000000000000000000000000000000000000000000000000000c0f2
 LOG=$(mktemp "${TMPDIR:-/tmp}/confluere-step.XXXXXX")
 BIG=0 # 1 while HyperEVM big blocks may be on for this account
-SEED_TTL=48 # Seed.s.sol _p: p.ttl of every seeded order (scripts/test/testnet-lib.test.sh checks the two agree)
+# Seeded books (Seed.s.sol book layout, SEED_APR_BPS > 0): priced by time to expiry at SEED_APR_BPS (10% a year), a
+# resting lender bid and borrower ask SEED_SPREAD_BPS (default half the rate) either side, so anyone can borrow or lend
+# at once; then TRADE_ROUNDS rounds of small crossing trades (the trade step) give each pool fills, a clearing price
+# and a short price history. SEED_TTL: settlements each seeded order may rest (Seed.s.sol reads it; at most 1000).
+export SEED_APR_BPS=${SEED_APR_BPS:-1000} SEED_TTL=${SEED_TTL:-1000}
+TRADE_ROUNDS=${TRADE_ROUNDS:-3}
+# Maturities opened at launch on the daily grid (GRID=daily, Deploy.s.sol): 1, 7 and 14 days (launch_expiries).
+MATURITY_DAYS=${MATURITY_DAYS:-"1 7 14"}
 
 # Chain parameters without touching the network: RPC, strikes, the deployments file, HyperEVM's gas flags. Tokens
 # default to the real ones above. scripts/test/grad-seed.test.sh reads them too.
@@ -27,29 +38,37 @@ testnet_params() {
       R=https://testnet-rpc.monad.xyz
       NAME=monad-testnet
       export LST=$M_SHMON NATIVE=$M_WMON USDC=$M_USDC
-      export LST_STRIKE_HIGH=12000000000000000000 LST_STRIKE_LOW=11000000000000000000 # ~93% / 85% of 12.9 MON
-      export USD_STRIKE_LOW=25000 USD_STRIKE_HIGH=26000                              # MON ≈ 0.027 USDC (Kuru mid)
-      # Extra pair shMON/USDC (every pair of MON/WMON/shMON/USDC that can be a market). Priced at the
-      # normal market price: shMON ≈ 1 MON ≈ 0.0248 USDC (Kuru MON_USDC mid; the testnet shMON contract's 12.9 MON
-      # redemption rate is a testnet artefact, not a price). Buy-back prices 0.021 / 0.023 USDC (~86% / 92%).
+      # One buy-back price per pair (equal strikes: CreatePools opens a single strike), about 90% of the collateral's
+      # normal market value on the 2-digit grid (2026-10-13): shMON ≈ 1 MON (the testnet shMON contract's 12.9 MON
+      # redemption rate is a testnet artefact, not a price), MON ≈ 0.0249 USDC (Kuru MON_USDC mid).
+      export LST_STRIKE_HIGH=900000000000000000 LST_STRIKE_LOW=900000000000000000 # 0.90 WMON per shMON (90%)
+      export USD_STRIKE_LOW=22000 USD_STRIKE_HIGH=22000                          # 0.022 USDC per WMON (88%)
+      # Extra pair shMON/USDC (every pair of MON/WMON/shMON/USDC that can be a market), same price as WMON/USDC.
       export EXTRA_ASSET=$M_SHMON EXTRA_QUOTE=$M_USDC EXTRA_BAND=800
-      export EXTRA_STRIKE_LOW=21000 EXTRA_STRIKE_HIGH=23000
-      export EXTRA_SEED_UNIT_BPS=${EXTRA_SEED_UNIT_BPS:-48} # 0.0048 shMON x 0.021 USDC clears the core's 0.0001 USDC minimum order
+      export EXTRA_STRIKE_LOW=22000 EXTRA_STRIKE_HIGH=22000
+      # Seed units: WMON/USDC 0.02 WMON (one seed plus the trade rounds clear the 0.001 USDC graduation row);
+      # shMON/WMON 0.002 shMON and shMON/USDC 0.005 shMON, just above the 0.001 WMON / 0.0001 USDC order minimums
+      # (the wallet holds little shMON; neither pair has to graduate)
+      export SEED_UNIT_BPS=${SEED_UNIT_BPS:-200} LST_SEED_UNIT_BPS=${LST_SEED_UNIT_BPS:-20}
+      export EXTRA_SEED_UNIT_BPS=${EXTRA_SEED_UNIT_BPS:-50}
       EXTRA=()
       ;;
     hyperevm)
       R=${HYPEREVM_RPC:-https://rpc.hyperliquid-testnet.xyz/evm} # rate-limited per IP; HYPEREVM_RPC=https://rpcs.chain.link/hyperevm/testnet also works
       NAME=hyperevm-testnet
       export NATIVE=$H_WHYPE USDC=$H_USDC LST=$ZERO
-      export USD_STRIKE_LOW=25000000 USD_STRIKE_HIGH=27000000 # HYPE ≈ 29.1 USDC on HyperCore testnet (2026-10-13): ~86% / 93%
+      # One buy-back price per pair at about 90% of the normal market value: HYPE ≈ 83.1 USDC on HyperCore mainnet spot
+      # (2026-10-13; the testnet book's ~29 is a testnet artefact): 75 USDC per WHYPE (90%).
+      export USD_STRIKE_LOW=75000000 USD_STRIKE_HIGH=75000000
       # Extra pair USDC/WHYPE (CreatePools EXTRA_*): lends the native coin against USDC, as shMON/WMON does on Monad.
-      # Strikes in WHYPE per USDC on the 2-digit grid: 0.028 / 0.030 (HYPE ≈ 29.1 USDC on HyperCore spot, 1/HYPE ≈
-      # 0.0343: about 82% / 87% of the collateral's value). 8% band like the USD pools (not pegged). The quote is WHYPE,
-      # whose graduation row (0.1 WHYPE per market and expiry) needs 0.32 USDC seed units: 24 x 0.32 = 7.7 USDC per roll,
-      # locked until that expiry closes (scripts/test/grad-seed.test.sh checks one seed clears the row).
+      # Strike in WHYPE per USDC: 0.011 (1 / 83.1 = 0.01204, so about 91%). 8% band like the USD pools (not pegged).
       export EXTRA_ASSET=$H_USDC EXTRA_QUOTE=$H_WHYPE EXTRA_BAND=800
-      export EXTRA_STRIKE_LOW=28000000000000000 EXTRA_STRIKE_HIGH=30000000000000000
-      export EXTRA_SEED_UNIT_BPS=${EXTRA_SEED_UNIT_BPS:-3200}
+      export EXTRA_STRIKE_LOW=11000000000000000 EXTRA_STRIKE_HIGH=11000000000000000
+      # Seed units: WHYPE/USDC 0.001 WHYPE (clears the 0.001 USDC graduation row many times over); USDC/WHYPE 0.2 USDC,
+      # above the 0.001 WHYPE order minimum (its 0.1 WHYPE graduation row would need ~2.3 USDC per order: not seeded)
+      export SEED_UNIT_BPS=${SEED_UNIT_BPS:-10} EXTRA_SEED_UNIT_BPS=${EXTRA_SEED_UNIT_BPS:-2000}
+      # Router.placeOrders batches (Seed.s.sol SEED_CHUNK) must fit a 3M-gas small block: 6 orders per transaction
+      export SEED_CHUNK=${SEED_CHUNK:-6}
       EXTRA=(--disable-block-gas-limit)                       # big blocks toggled per step
       export FOUNDRY_GAS_LIMIT=30000000
       ;;
@@ -267,9 +286,13 @@ testnet_cleanup() {
 trap testnet_cleanup EXIT
 trap 'exit 130' INT TERM
 
-# preflight: the deployer's balances must cover one seed of every launch pool and of the extra pair, if any (Seed.s.sol
-# _seedPool: per pool 1+2+3 units sold, and the same units bought at 97/98/99% of K; the extra pair at
-# EXTRA_SEED_UNIT_BPS), summed per token, before any pool is created, so a short wallet stops here and not halfway.
+# preflight: the deployer's balances must cover one seed of every launch pool and of the extra pair, if any, at every
+# expiry the pools step opens (EXPIRY plus LATER_EXPIRIES), summed per token, before any pool is created, so a short
+# wallet stops here and not halfway. Book layout (SEED_APR_BPS > 0, Seed.s.sol _seedBook and trade): per pool 2 units
+# sold and 2 bought, plus one of each per trade round (TRADE_ROUNDS), every buy valued at K (its limit is below K).
+# Crossing layout (SEED_APR_BPS=0, Seed.s.sol _seedPool): per pool 1+2+3 units sold, and the same units bought at
+# 97/98/99% of K. A pair whose two strikes are equal is one strike (CreatePools). The loop pair uses
+# LST_SEED_UNIT_BPS, the extra pair EXTRA_SEED_UNIT_BPS.
 # Each buy escrows exactly what the core's placeOrder pulls (OrderLogic, BUY):
 # quoteUp(units * limit) + ttl, i.e. the quote rounded up per order plus 1 wei per batch of its ttl (SEED_TTL below).
 # FUND=1 wraps the missing wrapped-native amount from the native balance (deposit()); USDC and shMON must be
@@ -287,7 +310,9 @@ rcast() {
 
 preflight() {
   local bps=${SEED_UNIT_BPS:-100} me
-  local xbps=${EXTRA_SEED_UNIT_BPS:-$bps} xa=${EXTRA_ASSET:-$ZERO}
+  local xbps=${EXTRA_SEED_UNIT_BPS:-$bps} xa=${EXTRA_ASSET:-$ZERO} lbps=${LST_SEED_UNIT_BPS:-${SEED_UNIT_BPS:-100}}
+  local nexp=1 later=${LATER_EXPIRIES:-}
+  [ -z "$later" ] || nexp=$((1 + $(echo "$later" | tr ',' '\n' | grep -c .)))
   signer_args
   me=$(cast wallet address "${SIGNER[@]}")
   dec() { rcast call "$1" "decimals()(uint8)" --rpc-url "$R" | awk '{print $1}'; }
@@ -303,15 +328,15 @@ preflight() {
     toks+=("$lbl=$a=$(dec "$a")=$(bal "$a")")
   done
   # pairs seeded: asset=quote=strikeLow=strikeHigh=bps (CreatePools order: loop pair, USD pair, extra pair)
-  [ "$LST" = "$ZERO" ] || pairs+=("$LST=$NATIVE=${LST_STRIKE_LOW:-0}=${LST_STRIKE_HIGH:-0}=$bps")
+  [ "$LST" = "$ZERO" ] || pairs+=("$LST=$NATIVE=${LST_STRIKE_LOW:-0}=${LST_STRIKE_HIGH:-0}=$lbps")
   pairs+=("$NATIVE=$USDC=$USD_STRIKE_LOW=$USD_STRIKE_HIGH=$bps")
   [ "$xa" = "$ZERO" ] || pairs+=("$xa=$EXTRA_QUOTE=$EXTRA_STRIKE_LOW=$EXTRA_STRIKE_HIGH=$xbps")
   local plan
-  plan=$(python3 - "$(rcast balance "$me" --rpc-url "$R")" "${GAS_RESERVE:-500000000000000000}" "$SEED_TTL" \
-    "${toks[*]}" "${pairs[*]}" <<'PY'
+  plan=$(python3 - "$(rcast balance "$me" --rpc-url "$R")" "${GAS_RESERVE:-500000000000000000}" "${SEED_TTL:-48}" \
+    "${toks[*]}" "${pairs[*]}" "$nexp" "${SEED_APR_BPS:-0}" "${TRADE_ROUNDS:-0}" <<'PY'
 import sys
-gas, reserve, ttl, toks, pairs = sys.argv[1:]
-ttl = int(ttl)
+gas, reserve, ttl, toks, pairs, nexp, apr, rounds = sys.argv[1:]
+ttl, nexp, book, rounds = int(ttl), int(nexp), int(apr) > 0, int(rounds)
 tok = {}  # lowercase address -> [label, decimals, balance, need]
 order = []
 for t in toks.split():
@@ -322,13 +347,20 @@ for p in pairs.split():
     asset, quote, k1, k2, bps = p.split("=")
     d = tok[asset.lower()][1]
     u = 10 ** d * int(bps) // 10_000
-    # Seed._seedPool per kind (2) and strike: sells of u*(j+1) (6 units), buys of u*(j+1) at K*(97+j)/100 for j = 0..2,
-    # each escrowing quoteUp(units, limit, 10**d) + ttl (OrderLogic placeOrder, BUY)
-    tok[asset.lower()][3] += 2 * 2 * 6 * u
-    for k in (int(k1), int(k2)):
+    strikes = sorted({int(k1), int(k2)})  # equal strikes: one strike (CreatePools)
+    for k in strikes:
+        if book:
+            # Seed._seedBook + trade(), per kind (2) and expiry: 2 + rounds sells and buys of u, each buy escrowing
+            # quoteUp(u, limit, 10**d) + ttl with limit < K (OrderLogic placeOrder, BUY)
+            n = 2 * nexp * (2 + rounds)
+            tok[asset.lower()][3] += n * u
+            tok[quote.lower()][3] += n * (-(-u * k // 10 ** d) + ttl)
+            continue
+        # Seed._seedPool per kind (2): sells of u*(j+1) (6 units), buys of u*(j+1) at K*(97+j)/100 for j = 0..2
+        tok[asset.lower()][3] += 2 * nexp * 6 * u
         for j in range(3):
             units, limit = u * (j + 1), k * (97 + j) // 100
-            tok[quote.lower()][3] += 2 * (-(-units * limit // 10 ** d) + ttl)
+            tok[quote.lower()][3] += 2 * nexp * (-(-units * limit // 10 ** d) + ttl)
 labels = {tok[a][0] for a in order}
 for lbl in ("lst", "native", "usdc"):  # the launch labels always print (lst 0 0 0 without an LST)
     if lbl not in labels:
@@ -368,6 +400,50 @@ PY
     echo "STOP: balances do not cover one seed at SEED_UNIT_BPS=$bps; nothing was created. Fund $me and re-run."
     exit 1
   fi
+}
+
+# launch_expiries: on a daily grid (deployments gridPeriod = 1 day), EXPIRY = the first expiry at least LAUNCH_LEAD
+# seconds away (default 12 h: the "1-day" pool) and LATER_EXPIRIES = the expiries MATURITY_DAYS - 1 periods after it
+# (7 and 14 days by default). Other grids: CreatePools takes the nearest expiry as before.
+launch_expiries() {
+  local period anchor now
+  period=$(jget "$J" gridPeriod); anchor=$(jget "$J" gridAnchor)
+  [ "$period" = 86400 ] || return 0
+  now=$(rcast block latest -f timestamp --rpc-url "$R")
+  read -r EXPIRY LATER_EXPIRIES <<<"$(python3 -c '
+import sys
+anchor, period, now, lead = (int(x) for x in sys.argv[1:5])
+days = [int(x) for x in sys.argv[5].split()]
+e = anchor + ((now - anchor) // period + 1) * period
+while e - now < lead:
+    e += period
+print(e, ",".join(str(e + (d - days[0]) * period) for d in days[1:]))
+' "$anchor" "$period" "$now" "${LAUNCH_LEAD:-43200}" "$MATURITY_DAYS")"
+  export EXPIRY LATER_EXPIRIES
+  echo "  expiries: $EXPIRY ${LATER_EXPIRIES:+(and $LATER_EXPIRIES)}"
+}
+
+# wait_batch: sleeps until just past the next batch boundary of the deployment's grid (15 s margin).
+wait_batch() {
+  local iv anchor now
+  iv=$(jget "$J" batchInterval); anchor=$(jget "$J" gridAnchor)
+  now=$(rcast block latest -f timestamp --rpc-url "$R")
+  sleep "$((iv - (now - anchor) % iv + 15))"
+}
+
+# trade_rounds: TRADE_ROUNDS rounds of small crossing trades in every pool of .pools.poolIds (Seed.s.sol trade(), each
+# round one batch later), each preceded by a KeeperReceiver tick that settles what is due (racing the keeper is
+# harmless: the receiver skips pools that are not due), and a last tick so the last round clears.
+trade_rounds() {
+  local r
+  [ "${TRADE_ROUNDS:-0}" -gt 0 ] || return 0
+  for ((r = ${TRADE_FROM:-0}; r < TRADE_ROUNDS; r++)); do # TRADE_FROM: continue after an interrupted round
+    wait_batch
+    run "tick: settle due pools" script/Seed.s.sol 0 --sig "tick()"
+    TRADE_ROUND=$r run "trade round $r" script/Seed.s.sol 0 --sig "trade()"
+  done
+  wait_batch
+  run "tick: settle due pools" script/Seed.s.sol 0 --sig "tick()"
 }
 
 # Regenerate what reads deployments/*.json: SDK addresses and, on Monad, the CRE workflow config (receiver, vaults,

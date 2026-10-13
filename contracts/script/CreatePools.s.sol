@@ -23,6 +23,10 @@ import {DeployConfig} from "./DeployConfig.sol";
 /// Env EXPIRY (optional, 0 = unset): open this grid expiry instead of the nearest one. scripts/roll-testnet.sh passes
 /// the expiry one period after the previous roll's, so its runs open consecutive expiries (graduation needs four in a
 /// row) however early they start; it must be on the grid, listable, and at least a quarter period ahead.
+/// Env LATER_EXPIRIES (optional, comma-separated grid expiries): the same pools are also opened at each of these
+/// (same checks as EXPIRY), listed after the first expiry's pools in `.pools.poolIds` and recorded with it in
+/// `.pools.expiries`; `.pools.expiry` stays the first one (scripts/roll-testnet.sh continues the daily chain from it).
+/// A pair whose two strikes are equal opens one strike (2 pools per expiry instead of 4, never the same id twice).
 contract CreatePools is Script {
     struct Pair {
         address asset;
@@ -34,12 +38,23 @@ contract CreatePools is Script {
         require(!vm.envOr("MOCKS", false) || block.chainid == DeployConfig.ANVIL, "mocks: anvil only");
         string memory path = _path();
         Confluere core = Confluere(vm.parseJsonAddress(vm.readFile(path), ".confluere"));
-        uint64 expiry = _expiry(core); // checked before anything is broadcast
+        uint64[] memory expiries = _expiries(core); // checked before anything is broadcast
         vm.startBroadcast();
         (address lst, address native, address usdc) = _tokens(core);
         Pair memory extra = _extra(core);
-        bytes32[] memory ids = _create(core, lst, native, usdc, extra, expiry);
+        bytes32[] memory ids = new bytes32[](12 * expiries.length);
+        uint256 n;
+        for (uint256 i; i < expiries.length; ++i) {
+            n = _create(core, lst, native, usdc, extra, expiries[i], ids, n);
+        }
+        assembly ("memory-safe") {
+            mstore(ids, n) // shrink to the pools actually listed
+        }
         vm.stopBroadcast();
+        uint256[] memory all = new uint256[](expiries.length);
+        for (uint256 i; i < expiries.length; ++i) {
+            all[i] = expiries[i];
+        }
 
         string memory k2 = "pools";
         if (extra.asset != address(0)) {
@@ -49,10 +64,11 @@ contract CreatePools is Script {
         vm.serializeAddress(k2, "lst", lst);
         vm.serializeAddress(k2, "native", native);
         vm.serializeAddress(k2, "usdc", usdc);
-        vm.serializeUint(k2, "expiry", expiry);
+        vm.serializeUint(k2, "expiry", expiries[0]);
+        vm.serializeUint(k2, "expiries", all);
         string memory out = vm.serializeBytes32(k2, "poolIds", ids);
         vm.writeJson(out, path, ".pools");
-        console2.log("pools created", ids.length, "expiry", expiry);
+        console2.log("pools created", ids.length, "expiry", expiries[0]);
     }
 
     /// @dev Token source, in order: env LST / NATIVE / USDC; the demo tokens Deploy.s.sol wrote (minted to the
@@ -81,9 +97,9 @@ contract CreatePools is Script {
             MockERC20(native).mint(me, 1e30);
             MockERC20(usdc).mint(me, 1e18);
         }
-        if (lst != address(0)) IERC20(lst).approve(address(core), type(uint256).max);
-        IERC20(native).approve(address(core), type(uint256).max);
-        IERC20(usdc).approve(address(core), type(uint256).max);
+        _approve(lst, me, core);
+        _approve(native, me, core);
+        _approve(usdc, me, core);
     }
 
     /// @dev The optional extra pair from env (asset zero = none), approved like the launch tokens.
@@ -93,18 +109,33 @@ contract CreatePools is Script {
         x.quote = vm.envAddress("EXTRA_QUOTE");
         x.strikes = [uint128(vm.envUint("EXTRA_STRIKE_LOW")), uint128(vm.envUint("EXTRA_STRIKE_HIGH"))];
         require(x.quote != address(0) && x.quote != x.asset, "EXTRA_QUOTE: zero or the asset");
-        IERC20(x.asset).approve(address(core), type(uint256).max);
-        IERC20(x.quote).approve(address(core), type(uint256).max);
+        (, address me,) = vm.readCallers();
+        _approve(x.asset, me, core);
+        _approve(x.quote, me, core);
+    }
+
+    /// @dev Unlimited approval of the core, sent only when it is not in place yet (one transaction less per token on
+    /// every re-run and roll).
+    function _approve(address token, address me, Confluere core) internal {
+        if (token != address(0) && IERC20(token).allowance(me, address(core)) < type(uint128).max) {
+            IERC20(token).approve(address(core), type(uint256).max);
+        }
     }
 
     function _path() internal view returns (string memory) {
         return DeployConfig.deploymentsFile(vm);
     }
 
-    function _create(Confluere core, address lst, address native, address usdc, Pair memory extra, uint64 expiry)
-        internal
-        returns (bytes32[] memory ids)
-    {
+    function _create(
+        Confluere core,
+        address lst,
+        address native,
+        address usdc,
+        Pair memory extra,
+        uint64 expiry,
+        bytes32[] memory ids,
+        uint256 n
+    ) internal returns (uint256) {
         // Loop pair at two LST strikes; lending pair at two USD strikes (env, defaults for demos); optional extra pair.
         Pair[3] memory pairs;
         // LST strikes default to 0.98 / 0.95 native per LST (1:1 LSTs); share-priced LSTs such as shMON (~12.9 MON)
@@ -122,23 +153,21 @@ contract CreatePools is Script {
         pairs[2] = extra;
         // pegged loop pools: 1.5% band; USD pools: 8% band; extra pair: EXTRA_BAND (default 8%); spread share 10%
         uint16[3] memory bands = [uint16(150), 800, uint16(vm.envOr("EXTRA_BAND", uint256(800)))];
-        ids = new bytes32[](12);
-        uint256 n;
         for (uint256 p; p < 3; ++p) {
             if (pairs[p].asset == address(0)) continue; // no LST (HyperEVM) / no extra pair
             n = _open(core, pairs[p], expiry, bands[p], ids, n);
         }
-        assembly ("memory-safe") {
-            mstore(ids, n) // shrink to the pools actually created
-        }
+        return n;
     }
 
-    /// @dev 2 strikes x 2 kinds of one pair into `ids` from index `n`; existing pools are kept, not created again.
+    /// @dev 2 strikes (1 when both are equal) x 2 kinds of one pair into `ids` from index `n`; existing pools are kept,
+    /// not created again.
     function _open(Confluere core, Pair memory pair, uint64 expiry, uint16 band, bytes32[] memory ids, uint256 n)
         internal
         returns (uint256)
     {
         for (uint256 s; s < 2; ++s) {
+            if (s == 1 && pair.strikes[1] == pair.strikes[0]) break; // single strike
             for (uint256 k; k < 2; ++k) {
                 PoolKey memory key = PoolKey(pair.asset, pair.quote, expiry, pair.strikes[s], Kind(k));
                 bytes32 id = PoolKeyLib.toId(key);
@@ -149,9 +178,22 @@ contract CreatePools is Script {
         return n;
     }
 
-    function _expiry(Confluere core) internal view returns (uint64) {
+    /// @dev EXPIRY (or the nearest expiry), then LATER_EXPIRIES; each checked, none listed twice.
+    function _expiries(Confluere core) internal view returns (uint64[] memory out) {
+        string memory later = vm.envOr("LATER_EXPIRIES", string(""));
+        string[] memory items = bytes(later).length == 0 ? new string[](0) : vm.split(later, ",");
+        out = new uint64[](1 + items.length);
         uint256 e = vm.envOr("EXPIRY", uint256(0));
-        if (e == 0) return _nextExpiry(core);
+        out[0] = e == 0 ? _nextExpiry(core) : _checked(core, e);
+        for (uint256 i; i < items.length; ++i) {
+            out[i + 1] = _checked(core, vm.parseUint(items[i]));
+            for (uint256 j; j <= i; ++j) {
+                require(out[j] != out[i + 1], "LATER_EXPIRIES: expiry listed twice");
+            }
+        }
+    }
+
+    function _checked(Confluere core, uint256 e) internal view returns (uint64) {
         GridConfig memory g = core.grid();
         require(e >= g.anchor && (e - g.anchor) % g.period == 0, "EXPIRY: not on the grid");
         require(e >= block.timestamp + g.period / 4, "EXPIRY: less than a quarter period ahead");
