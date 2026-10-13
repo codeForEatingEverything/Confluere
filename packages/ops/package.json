@@ -1,0 +1,27 @@
+{
+  "name": "@confluere/ops",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "status": "tsx src/cli.ts status",
+    "hl-to-evm": "tsx src/cli.ts hl-to-evm",
+    "big-blocks": "tsx src/cli.ts big-blocks",
+    "blocktime": "tsx src/cli.ts blocktime",
+    "spot-sell": "tsx src/cli.ts spot-sell",
+    "cctp": "tsx src/cli.ts cctp",
+    "cctp-resume": "tsx src/cli.ts cctp-resume",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@msgpack/msgpack": "3.1.3",
+    "viem": "2.57.4"
+  },
+  "devDependencies": {
+    "@types/node": "26.6.5",
+    "tsx": "4.23.15",
+    "typescript": "6.0.3",
+    "vitest": "5.0.3"
+  }
+}
