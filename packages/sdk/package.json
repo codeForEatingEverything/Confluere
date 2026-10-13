@@ -1,0 +1,29 @@
+{
+  "name": "@confluere/sdk",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "codegen": "wagmi generate && node scripts/sync-deployments.mjs",
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "sync": "node scripts/sync-deployments.mjs"
+  },
+  "dependencies": {
+    "viem": "2.57.4"
+  },
+  "devDependencies": {
+    "@wagmi/cli": "2.10.0",
+    "typescript": "6.0.3",
+    "vitest": "5.0.3"
+  }
+}
