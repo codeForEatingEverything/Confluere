@@ -5,97 +5,98 @@ export const deployments: Record<number, Deployment> = {
   "998": {
     "batchInterval": 120,
     "chainId": 998,
-    "confluere": "0xf969CAb062278362b3E705C7c5b88bDEE2610De7",
-    "demo": true,
-    "deployBlock": 66685973,
+    "confluere": "0x7E023810Db3a9b894cdfA623AaA3dcE4ebccb1f7",
+    "demo": false,
+    "deployBlock": 66780236,
+    "grid": "daily",
     "gridAnchor": 1791532800,
-    "gridPeriod": 3600,
+    "gridPeriod": 86400,
     "guardian": "0x5b38eF87c2be24041C62Ac97cAB1eB92f48eCDAE",
-    "keeperReceiver": "0x905f3425a0A4e4228630AcA0d517E0388a4c0f34",
-    "router": "0x1d0334Ab3e8C10C5a4f10C8e5B7C464CA77bE26D",
-    "seatRegistry": "0x7cd66cc0A507c90A8D70EFC036F752f275420BC8",
-    "vaultFactory": "0xD5E3cfEf67c284054f5Ac0643478F32B3f1Fcd62",
-    "windowBlocks": 300,
-    "wrapperFactory": "0x213831f5E37B9D9BdC266F38aBf3f34503217aB2",
+    "keeperReceiver": "0x6eD0BbB98B9480462DcA280E91489e2de3bE53C5",
+    "maxExpiries": 15,
+    "router": "0xC21934727Fe7C3EeFb0a2452a67d0b79891DCe56",
+    "seatRegistry": "0x5A5abDc22fb90B166c393A5dF540e00B021040ec",
+    "vaultFactory": "0x3f8a54B7c4bEDce52e4B3D6B5cfD8Cc4984D594d",
+    "windowBlocks": 7200,
+    "wrapperFactory": "0x121D502f6b005804E794Ea52313B1ea90584dea0",
     "pools": {
-      "expiry": 1791874800,
+      "expiries": [
+        1791964800,
+        1792483200,
+        1793088000
+      ],
+      "expiry": 1791964800,
       "extraAsset": "0x2B3370eE501B4a559b57D449569354196457D8Ab",
       "extraQuote": "0x5555555555555555555555555555555555555555",
       "lst": "0x0000000000000000000000000000000000000000",
       "native": "0x5555555555555555555555555555555555555555",
       "poolIds": [
-        "0xc5fc24d600e2dfa1ce2119fd3a393d740ce38fb51b0236d3b32b1c4c4538b670",
-        "0x5a4050810684f9003a3703dcad30074302cd50250c108df11754a140272903da",
-        "0xd6d256627b9a4d70df2f4ac8b498dc890d9d7c9b75eb21370f0607d286a04096",
-        "0xeee62223d1edb4f2e8fb5f4ed36393286f54ed9ac276beb2200b71eeff8e5e5e",
-        "0x193e6f5ed23c7ec243eb0c46f59d575969e65e2ca2ce114e741e0db44410ecee",
-        "0xea246a2ace3f13c064b33ec091c69bad28d80bd723c0db0ee16fa42e267cdeec",
-        "0x85b7ede7959f1edde939c815a90185744288760ae335a686e47aa26e9369e9ea",
-        "0xfb73726172361a8684feff2d89cd7d163a0ed28baf92dff857bc594ac0e56e9e"
+        "0x47ef09789ebb8e836c84be6e8529405006d287792876e8965135a47bf503aa04",
+        "0xe14cbadc3366e29006b9d377619f5b0b77c8c98624a297ccd4bee13ca60c880e",
+        "0x02b45767ad7a9de7b74e5adcc96142f3196851c9d691ce6c14850836795f2d7a",
+        "0x06cdca0ae3e4931d710dcfcaa12ae99b0fc8b8d3d7c07a9fe78b0f12c63529bc",
+        "0xab40284bb99a02017ae89a52d0c92c3bb33d4197b3346333ab247806b8fe30e8",
+        "0xf4a9fec131b4aa5b76140f75e861cefbf08d7766b7a3bf5838a4b866e76fd5b6",
+        "0xdc7e8c29682aeb6e0f8049f118c5cc0cd1bf1b4b8172129e9cfa7450642a073e",
+        "0x11cdb168658aba622033e822b67f394dce7c4adc080748e0115f5c96bd71bf82",
+        "0xd02f0f6739f7a92a86134a2238b7453baae342e22c693bc7378a4d469b3e03fa",
+        "0xa8d5ceebfd1ff1687aa07826dad5afd02ed8d0eb3183c9eb0cbff3d19fa725cc",
+        "0x64460c14db0e1657b91da37f2eaa4878b5b6aaef5b16f6adf621e1f16d002218",
+        "0x0279b0657042e9f467a9d4ee08403873afd6fb632df9bbf47f4b580b7c42bf3a"
       ],
       "usdc": "0x2B3370eE501B4a559b57D449569354196457D8Ab"
-    },
-    "vaults": {
-      "nativeLend": "0x5da46E68f2533db1c39b475d3c996F47c73a623e",
-      "pegged": "0x0000000000000000000000000000000000000000",
-      "usdHigh": "0xdf99FBA0F15C99Ea1D2c24620f8F1B6B03285B13",
-      "usdLow": "0xF942fcC5721549f9B0D989B0C903AB853267B50A"
-    },
-    "seatLPTokens": {
-      "0x5555555555555555555555555555555555555555-0x2B3370eE501B4a559b57D449569354196457D8Ab-0": "0xd247ec1c227B83E15ffe8693dE96Fb87E351D2f5",
-      "0x5555555555555555555555555555555555555555-0x2B3370eE501B4a559b57D449569354196457D8Ab-1": "0xa1695E2dd08bF23dbB48fBBc0ca90Fc37f500Bb2"
-    },
-    "positionMarket": "0x85A19c91830a8dB571dCD9F73CD9bEa5854b5857"
+    }
   },
   "10143": {
     "batchInterval": 120,
     "chainId": 10143,
-    "confluere": "0xf969CAb062278362b3E705C7c5b88bDEE2610De7",
-    "demo": true,
-    "deployBlock": 70328679,
+    "confluere": "0x7E023810Db3a9b894cdfA623AaA3dcE4ebccb1f7",
+    "demo": false,
+    "deployBlock": 70643347,
+    "grid": "daily",
     "gridAnchor": 1791532800,
-    "gridPeriod": 3600,
+    "gridPeriod": 86400,
     "guardian": "0x5b38eF87c2be24041C62Ac97cAB1eB92f48eCDAE",
-    "keeperReceiver": "0x905f3425a0A4e4228630AcA0d517E0388a4c0f34",
-    "router": "0x1d0334Ab3e8C10C5a4f10C8e5B7C464CA77bE26D",
-    "seatRegistry": "0xAabA35b56aADE36276a94B51A35CA07cBa5D42c8",
-    "vaultFactory": "0xD5E3cfEf67c284054f5Ac0643478F32B3f1Fcd62",
-    "windowBlocks": 1000,
-    "wrapperFactory": "0x213831f5E37B9D9BdC266F38aBf3f34503217aB2",
+    "keeperReceiver": "0x6eD0BbB98B9480462DcA280E91489e2de3bE53C5",
+    "maxExpiries": 15,
+    "router": "0xC21934727Fe7C3EeFb0a2452a67d0b79891DCe56",
+    "seatRegistry": "0xfAC059142113670BB4D51c845a87907660636Bee",
+    "vaultFactory": "0x3f8a54B7c4bEDce52e4B3D6B5cfD8Cc4984D594d",
+    "windowBlocks": 24000,
+    "wrapperFactory": "0x121D502f6b005804E794Ea52313B1ea90584dea0",
     "pools": {
-      "expiry": 1791867600,
+      "expiries": [
+        1791964800,
+        1792483200,
+        1793088000
+      ],
+      "expiry": 1791964800,
       "extraAsset": "0x282BdDFF5e58793AcAb65438b257Dbd15A8745C9",
       "extraQuote": "0x534b2f3A21130d7a60830c2Df862319e593943A3",
       "lst": "0x282BdDFF5e58793AcAb65438b257Dbd15A8745C9",
       "native": "0xFb8bf4c1CC7a94c73D209a149eA2AbEa852BC541",
       "poolIds": [
-        "0x541037cf61f3d88c2f089d84b015deb02a435ddab42491355e10f32ea435aa56",
-        "0xed8fcf4a50b57a200e494d47c18f72221c16604b655d482b7fbc1a85db158ec0",
-        "0xbc34fbf03c3a17d247026052503ae1beefa792e5ebf1ddb5bb49910ca1856880",
-        "0xf22a2afc6fd60e33c5aa27285744b8a7e3cabe60915f5ffd16f2f53968a75ba8",
-        "0x662b9e98e62b851d3ed1f51763193459646f205e5ce8448aaabf07783b5cbd4a",
-        "0x30fcf434750fa96d14a6257b7cc26d69d88f92a614996fd0e13392f9edfce974",
-        "0xe2c32f580fb3da1b50a53dd5dcc38353b28c652924f97059cd6df5f99069a366",
-        "0x215be22b3f2748f3bfea4940745de74a7108ff558bbd6c5224f240dd78f66858",
-        "0x42b0f22d902b225a9394146c2e3504f7291b8638c6fa507000b372087e50bc42",
-        "0xc030a96b9e4aad8e7b71a16b78544ff9e280fc7dac0b149378f18e4d33aec4c8",
-        "0xf4191cffd3d6ea41ad6a9dacc618efa3ae21567af1b49f92be013ee54163d04c",
-        "0xe64b0b04245da5b15d88d7965d45de24c4d176c8fd15cd0397b297f527cb33b2"
+        "0x5e7bac7be2a0d7735e65683fa4f29fdeb3a663131a91f28bf871dde47fe63caa",
+        "0x3887b45b851b95057408b13c8d0a9730a3b8e97afc084a9c78c624709ee57d78",
+        "0x22e9d22e8599341f1de4ee53fae97ebf9fce74e6cb371821ccab38760a69cb4a",
+        "0xdfee16d41f4a7b77e5347d1101e2020bfa93e4f4769a5b9433371999c5dcfadc",
+        "0xe46d2f6156ad7e957123581333d6b8d74a6a68d5d3c7bc3c784d65f0d660fe02",
+        "0x3059525dcbd4ec6db79f6ea733303f8f2b4bf0b298d64a13a635b0d038bd4438",
+        "0x489dc6bd19be9a79844741554e546f21a393d30cdb5590edce1094afe8db68f8",
+        "0x477c91cd5fa218139db603842b9f067113b596548b9f0bd991097888fc2d43a2",
+        "0xf47ecc576d65625d4acb98ca269569265ae4ff41fde03032b519aab168e9fc36",
+        "0x738c2b2f3f22726caf7ad00a9f7a89a2f03213ac5a3e7defb46aa18e2cb1ad3e",
+        "0x5b8f2e18c9db05059205015d9bca995e02d4c5c2a963cf61036d0c72c35cb042",
+        "0xa3ce2f47359737d77098fa2965d4fd2c33abaef6c82e9917a1aa223ea0ec15f6",
+        "0x8d435735fecd082b016ff1d5788f35370edeada7fbef4ade6d4736cca119f386",
+        "0x9c58d849ae89ed96e322b73c401e6dd6eb3b332089c4f02bf1d253a1b8c5101e",
+        "0xff6211e6409438201805655537b24b2a400b9d9f2f891e184648eec61e18f25a",
+        "0x493968abbafc19cdeb5fb184a8dfc7b4755b96c71ca7537f5d522ea356d44e06",
+        "0xe1758e56a476a1d3f170084921b7a86d5b0e667f4fa09d9389b0d3aa6914e2c8",
+        "0xf10a67a080721d9ca31f4382aafbd627f074be04ef74136bec0f0aefc0fdb3f8"
       ],
       "usdc": "0x534b2f3A21130d7a60830c2Df862319e593943A3"
-    },
-    "vaults": {
-      "pegged": "0xB100ff1fD37621332f0E1143FdaF758514277d64",
-      "usdHigh": "0x734183Ec2B602002eFB07895cA53D1d8F244AD1e",
-      "usdLow": "0xf7B3401B9754049661e13D7116255B172bcC1796"
-    },
-    "seatLPTokens": {
-      "0x282BdDFF5e58793AcAb65438b257Dbd15A8745C9-0xFb8bf4c1CC7a94c73D209a149eA2AbEa852BC541-0": "0xa06E84e5EF01291C43aC57b450cB6849A62221f4",
-      "0x282BdDFF5e58793AcAb65438b257Dbd15A8745C9-0xFb8bf4c1CC7a94c73D209a149eA2AbEa852BC541-1": "0x7bf5c13A1aD43A25ed79098Bf96D8cb5835bC86d",
-      "0xFb8bf4c1CC7a94c73D209a149eA2AbEa852BC541-0x534b2f3A21130d7a60830c2Df862319e593943A3-0": "0x953ec3ff91a9A2a794BC086D659395D2C1631053",
-      "0xFb8bf4c1CC7a94c73D209a149eA2AbEa852BC541-0x534b2f3A21130d7a60830c2Df862319e593943A3-1": "0x5934a886c49561Cd5F6Ba8a8de4548DbC7E9323e"
-    },
-    "positionMarket": "0x85A19c91830a8dB571dCD9F73CD9bEa5854b5857"
+    }
   },
   "31337": {
     "batchInterval": 120,
@@ -116,20 +117,21 @@ export const deployments: Record<number, Deployment> = {
     },
     "vaultFactory": "0x25D2dd337ff63b4Aaa8d807E203139C4645Ab86b",
     "windowBlocks": 300,
-    "wrapperFactory": "0xA1BB757d58Ac29bC00671450C1480691373FE16E",
+    "wrapperFactory": "0xB5D224778541Eba717D53a708987a56a2377a47F",
+    "positionMarket": "0xD5b7f3C439843458E3ab573f1C8bb0068A94fFb9",
     "pools": {
-      "expiry": 1791820800,
+      "expiry": 1791885600,
       "lst": "0x2e9C7A7a96c6f8F0fB43335825E2113ade290194",
       "native": "0x1E3a9dB105f57E26b13928A95Ac0354F0ae7D031",
       "poolIds": [
-        "0x4611c26fe63530a3eb35223bd78c3daf9a9b186c5f5c7eb49fc35b1ca1a2384a",
-        "0x8a89eba7d92da56ae6c088cdc15fe85109ed52e16c7bad33e08fba222f4af8dc",
-        "0xc3fa98439d5aa078526195408602da645d086e442a6882d10115fffe11afbbf6",
-        "0x0d9600679d94c54f56a39c30fa41cd068d3a3aaf6f76788b872b8c3f0bd161b2",
-        "0x624847847efba439a51cf4700ddec0abf564010451178d3fea1a6b9ed9daeafa",
-        "0xb0e17d40212a652d1428dd3305ee1fa9d465f3e989e0beae773a372af95f6d5a",
-        "0xbde9ec6085663d0820ed0f45568187c59aec441be19e81b0217934b73d704df6",
-        "0x0ada82aaaa631dd46b6b00ff44cfa27dc2eb4c1e79a5e4183424aaa65a0475b0"
+        "0x22517c0a89c8c6f9fa67246b6b4c0fbf1bbe1897c36f2cb6e7a769a098f887f4",
+        "0x4fb6ac28db82ee77ba48da26d3a24e10332bac0c4de02eb77d8526f08f969930",
+        "0x0f91adb629f77159e865b1090d71d0186411d2692d931c7794adf112d291de54",
+        "0x378c6e532d05812e6f6259a7073b46ecf587a1d5a5d38be99eac401bc49cedfc",
+        "0x556a26575bc5b21b35bc9c3a746afab929a109cde4032ce041b96ac91ab5c03a",
+        "0x7ad1de9413900c8dcd21ffcc4fc25b6d478f3cff98b61e6ce9d62d08842c06c2",
+        "0xb2330db8ab2f2cdfbfcb1924698110b2e1e10c8ae0316c990b24e319961754b8",
+        "0x220905358758d2d019d18e1b6c1ce2052a9239cadfb45e9dfe6c12885bdec132"
       ],
       "usdc": "0x7A02C6E19a70A35324d061ACcDd0D4b5766f1A8f"
     },
@@ -137,7 +139,6 @@ export const deployments: Record<number, Deployment> = {
       "pegged": "0xb757A7750F28df15150e74B1b1C0CE3717b9a645",
       "usdHigh": "0x54EE99296Fc889ac3cfbF0796861c66CB8dEB7a2",
       "usdLow": "0xD427d76ffF5Aba58aE35e913bD8BebAd30b04924"
-    },
-    "positionMarket": "0xD5b7f3C439843458E3ab573f1C8bb0068A94fFb9"
+    }
   }
 } as const as unknown as Record<number, Deployment>;

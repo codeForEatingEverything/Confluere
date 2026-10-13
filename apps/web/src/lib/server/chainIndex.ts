@@ -70,6 +70,8 @@ type Index = {
   updatedAt: number;
   failures: number;
   savedAt: number;
+  /** The core this index scans: a redeploy (new address in the SDK deployments) starts a fresh index. */
+  core: string;
   error?: string;
 };
 
@@ -134,6 +136,7 @@ function create(chainId: number): Index {
     updatedAt: 0,
     failures: 0,
     savedAt: 0,
+    core: lc(d.confluere),
   };
   for (const id of d.pools?.poolIds ?? []) ix.pools.set(lc(id), { id, block: null });
   load(ix, d.confluere);
@@ -301,7 +304,7 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
  */
 export async function getIndex(chainId: number, waitMs = 1_200, rpc: Rpc = fetchRpc): Promise<Index> {
   let ix = indexes.get(chainId);
-  if (!ix) indexes.set(chainId, (ix = create(chainId)));
+  if (!ix || ix.core !== lc(deploymentOf(chainId)!.confluere)) indexes.set(chainId, (ix = create(chainId)));
   const gap = ix.failures ? Math.min(30_000, REFRESH_MS * 2 ** ix.failures) : REFRESH_MS;
   if (!ix.scan && Date.now() - ix.lastStart >= gap) {
     const it = ix;
