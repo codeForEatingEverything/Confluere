@@ -113,12 +113,12 @@ Same bytecode at the same CREATE2 addresses on both networks.
 
 | Contract | Monad Testnet (10143) and HyperEVM Testnet (998) |
 |---|---|
-| Confluere (core) | `0xf969CAb062278362b3E705C7c5b88bDEE2610De7` |
-| Router | `0x1d0334Ab3e8C10C5a4f10C8e5B7C464CA77bE26D` |
-| VaultFactory | `0xD5E3cfEf67c284054f5Ac0643478F32B3f1Fcd62` |
-| C / R wrapper factory | `0x213831f5E37B9D9BdC266F38aBf3f34503217aB2` |
-| PositionMarket | `0x85A19c91830a8dB571dCD9F73CD9bEa5854b5857` |
-| KeeperReceiver | `0x905f3425a0A4e4228630AcA0d517E0388a4c0f34` |
+| Confluere (core) | `0x7E023810Db3a9b894cdfA623AaA3dcE4ebccb1f7` |
+| Router | `0xC21934727Fe7C3EeFb0a2452a67d0b79891DCe56` |
+| VaultFactory | `0x3f8a54B7c4bEDce52e4B3D6B5cfD8Cc4984D594d` |
+| C / R wrapper factory | `0xECE60ddCA37b3a649a294D834886fb680294D118` |
+| PositionMarket | `0x545FE5379eDe03DC1Fd83c0Dc5376Def3D0a2359` |
+| KeeperReceiver | `0x6eD0BbB98B9480462DcA280E91489e2de3bE53C5` |
 
 Seat registries, vaults and every other address are listed per network in [`deployments/`](deployments/). Nothing is deployed on a mainnet.
 
