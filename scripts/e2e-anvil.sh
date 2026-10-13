@@ -107,11 +107,12 @@ cast send $VAULT "poke()" --rpc-url $R --private-key $PK1 >/dev/null
 fs "seeded|Error" script/Seed.s.sol $FS --private-key $PK0
 fs "Error" script/Seed.s.sol --sig "leftover(uint256)" 4 $FS --private-key $PK0
 step "bootstrap MM quotes the native/usd pool before the boundary"
-NEXT=$(cast call $CORE "nextBatchAt(bytes32)(uint256)" $PID --rpc-url $R | awk '{print $1}'); warp $((NEXT - $(now) - 30))
-cast send $NATIVE "mint(address,uint256)" 0x90F79bf6EB2c4f870365E785982E1f101E93b906 1000000000000000000000 --rpc-url $R --private-key $PK0 >/dev/null
-cast send $USD "mint(address,uint256)" 0x90F79bf6EB2c4f870365E785982E1f101E93b906 1000000000000 --rpc-url $R --private-key $PK0 >/dev/null
 # a different pool than the vault's target: competitive bids rightly take priority over non-competitive ones
 PID_MM=$(q "d['pools']['poolIds'][6]")
+cast send $NATIVE "mint(address,uint256)" 0x90F79bf6EB2c4f870365E785982E1f101E93b906 1000000000000000000000 --rpc-url $R --private-key $PK0 >/dev/null
+cast send $USD "mint(address,uint256)" 0x90F79bf6EB2c4f870365E785982E1f101E93b906 1000000000000 --rpc-url $R --private-key $PK0 >/dev/null
+# warp against the MM's own pool (its boundary can differ from the vault target's) so it is inside its 90 s lead
+NEXT=$(cast call $CORE "nextBatchAt(bytes32)(uint256)" $PID_MM --rpc-url $R | awk '{print $1}'); warp $((NEXT - $(now) - 30))
 BMM_STATE="$TMPD/bmm-state.json"   # fresh spend / start / exit record for this run (BSD and GNU mktemp differ on -t)
 bmm() { (cd "$ROOT" && STATE_FILE=$BMM_STATE PRIVATE_KEY=0x7c852118294e51e653712a81e05800f419141751be58f605c371e15141b007a6 CHAIN_ID=31337 POOLS="$PID_MM:main" \
   PER_BATCH_QUOTE=1000000000 TOTAL_QUOTE=10000000000 LEAD_S=90 pnpm --filter @confluere/bootstrap-mm -s once); }
