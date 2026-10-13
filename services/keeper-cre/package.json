@@ -1,0 +1,22 @@
+{
+  "name": "@confluere/keeper-cre",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "compile": "bun x cre-compile src/main.ts dist/workflow.wasm",
+    "simulate": "cre workflow simulate . --target staging-settings --non-interactive --trigger-index 0",
+    "sync-config": "node scripts/sync-config.mjs",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@chainlink/cre-sdk": "1.23.0",
+    "viem": "2.57.4",
+    "zod": "3.25.76"
+  },
+  "devDependencies": {
+    "typescript": "6.0.3",
+    "vitest": "5.0.3"
+  }
+}
