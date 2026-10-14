@@ -26,7 +26,9 @@ const anyChainName = (id: number | undefined) => (id !== undefined && KNOWN[id])
 /** Markets with a maturity still ahead, per chain, from the server index (no chain reads, so the menu opens instantly). */
 export function openMarketCount(idx: PoolIndex | undefined, nowS: number): number | undefined {
   if (!idx) return undefined;
-  return new Set(idx.pools.filter((p) => (p.expiry ?? 0) > nowS).map((p) => p.marketId ?? `${p.asset}/${p.quote}/${p.kind}`)).size;
+  const n = new Set(idx.pools.filter((p) => (p.expiry ?? 0) > nowS).map((p) => p.marketId ?? `${p.asset}/${p.quote}/${p.kind}`)).size;
+  // while the server's first scan is still running the pools' details are unknown: say "Checking", never "No open markets"
+  return n === 0 && !idx.status?.complete ? undefined : n;
 }
 
 function useMarketCounts(chains: ChainMeta[]) {

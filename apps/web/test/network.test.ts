@@ -39,3 +39,15 @@ describe("retryDelay", () => {
     expect([0, 1, 2, 3, 6].map(retryDelay)).toEqual([1000, 2000, 4000, 8000, 8000]);
   });
 });
+
+describe("network menu market count", () => {
+  it("says Checking (undefined) while the server's first scan has no pool details yet, never 0", async () => {
+    const { openMarketCount } = await import("../src/components/layout/NetworkMenu");
+    const now = 1_000;
+    const pending = { status: { chainId: 10143, complete: false, scannedTo: 1, head: 9, updatedAt: 0 }, pools: [{ id: "0x01", block: null }], last: {} } as never;
+    expect(openMarketCount(pending, now)).toBeUndefined();
+    const done = { status: { chainId: 10143, complete: true, scannedTo: 9, head: 9, updatedAt: 1 }, pools: [{ id: "0x01", block: 5, expiry: 2_000, marketId: "0xm" }], last: {} } as never;
+    expect(openMarketCount(done, now)).toBe(1);
+    expect(openMarketCount({ ...(done as object), pools: [] } as never, now)).toBe(0);
+  });
+});

@@ -10,6 +10,7 @@
  * failed scan changes nothing. The index is also written to .next/cache/confluere-index/<chainId>.json (override the
  * folder with CONFLUERE_INDEX_DIR) at most every 10 s, so a restarted server starts warm; `pnpm clean` removes it.
  */
+import { after } from "next/server";
 import { mkdir, readFileSync, writeFile } from "./fsCompat";
 import { join } from "node:path";
 import { decodeEventLog, parseAbi, toEventSelector, type Hex } from "viem";
@@ -326,6 +327,22 @@ export async function getIndex(chainId: number, waitMs = 1_200, rpc: Rpc = fetch
   // refresh lands for the next request
   if (ix.scan && waitMs > 0 && !ix.complete) await Promise.race([ix.scan, sleep(waitMs)]);
   return ix;
+}
+
+/**
+ * Keep an unfinished scan running after the response is sent. On serverless hosts (Vercel) a function is frozen once
+ * it answers, so a cold backfill that needs more than one request's wait (Monad: many log chunks) would never finish;
+ * `after` keeps the function alive until the scan settles (bounded by the route's maxDuration). Outside a request
+ * scope (tests, scripts) it is a no-op.
+ */
+export function keepScanning(ix: Index): void {
+  const scan = ix.scan;
+  if (!scan) return;
+  try {
+    after(() => scan.catch(() => undefined));
+  } catch {
+    // not inside a request (unit tests): nothing to keep alive
+  }
 }
 
 export function statusOf(ix: Index): IndexStatus {
