@@ -1,0 +1,50 @@
+# Caddy in front of the web app, behind Cloudflare (orange cloud, SSL/TLS mode "Full (strict)").
+# TLS uses a Cloudflare Origin Certificate (deploy/certs/origin.pem + origin-key.pem), so no ACME is needed and the
+# origin only has to be trusted by Cloudflare. Cloudflare's IP ranges: https://www.cloudflare.com/ips/ (re-check them
+# now and then; they rarely change). The list appears twice below: keep both copies identical.
+{
+	servers {
+		# the visitor's real IP comes from Cloudflare's header, trusted only from Cloudflare's own addresses
+		trusted_proxies static 173.245.48.0/20 103.21.244.0/22 103.22.200.0/22 103.31.4.0/22 141.101.64.0/18 108.162.192.0/18 190.93.240.0/20 188.114.96.0/20 197.234.240.0/22 198.41.128.0/17 162.158.0.0/15 104.16.0.0/13 104.24.0.0/14 172.64.0.0/13 131.0.72.0/22 2400:cb00::/32 2606:4700::/32 2803:f800::/32 2405:b500::/32 2405:8100::/32 2a06:98c0::/29 2c0f:f248::/32
+		client_ip_headers CF-Connecting-IP
+		timeouts {
+			read_header 10s
+			read_body 15s
+			write 120s
+			idle 2m
+		}
+	}
+}
+
+{$SITE_DOMAIN:app.confluere.xyz} {
+	tls /etc/caddy/certs/origin.pem /etc/caddy/certs/origin-key.pem
+
+	# only Cloudflare may talk to the origin: direct hits on the server's IP are dropped
+	@not_cloudflare not remote_ip 173.245.48.0/20 103.21.244.0/22 103.22.200.0/22 103.31.4.0/22 141.101.64.0/18 108.162.192.0/18 190.93.240.0/20 188.114.96.0/20 197.234.240.0/22 198.41.128.0/17 162.158.0.0/15 104.16.0.0/13 104.24.0.0/14 172.64.0.0/13 131.0.72.0/22 2400:cb00::/32 2606:4700::/32 2803:f800::/32 2405:b500::/32 2405:8100::/32 2a06:98c0::/29 2c0f:f248::/32
+	abort @not_cloudflare
+
+	# the app takes no uploads; refuse large bodies early
+	request_body {
+		max_size 1MB
+	}
+
+	encode zstd gzip
+
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		Permissions-Policy "camera=(), microphone=(), geolocation=(), payment=()"
+		-Server
+		-X-Powered-By
+	}
+
+	# fingerprinted build assets never change: let Cloudflare and browsers keep them
+	@static path /_next/static/*
+	header @static Cache-Control "public, max-age=31536000, immutable"
+
+	reverse_proxy web:3000 {
+		header_up X-Real-IP {client_ip}
+	}
+}

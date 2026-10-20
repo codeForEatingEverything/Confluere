@@ -1,0 +1,17 @@
+# Docker build context for deploy/web.Dockerfile: the pnpm workspace without build output, secrets or heavy dirs.
+.git
+**/node_modules
+**/.next
+**/dist
+**/.turbo
+**/*.log
+**/.env
+**/.env.*
+!**/.env.example
+contracts
+docs
+Discussions
+.agents
+.claude
+deploy/certs
+deploy/.env

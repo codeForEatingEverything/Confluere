@@ -36,3 +36,6 @@ CLAUDE.md
 # every markdown doc except the root README stays local
 **/*.md
 !/README.md
+
+# Cloudflare origin certificate and key for deploy/ (never commit)
+deploy/certs/
