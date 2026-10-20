@@ -1,10 +1,14 @@
 import type { NextConfig } from "next";
+import { join } from "node:path";
 
 // All protocol data is read client-side from the chain (wagmi) or this app's /api index, so pages stay static shells.
 // Old URLs move to their new place with a 301 (FRONTEND_V3 §5.3, updated for IA v3.1).
 const moved = (source: string, destination: string) => ({ source, destination, statusCode: 301 as const });
 
 const nextConfig: NextConfig = {
+  // self-hosted in Docker (deploy/): a standalone server bundle; the tracing root is the pnpm workspace
+  output: "standalone",
+  outputFileTracingRoot: join(__dirname, "../.."),
   transpilePackages: ["@confluere/sdk"],
   async redirects() {
     return [
