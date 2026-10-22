@@ -6,7 +6,8 @@
 <a href="https://jupyter.org"><img src="https://img.shields.io/badge/Jupyter-Notebook-blue?logo=jupyter" alt="JupyterNotebook"></a>
 </p>
 
-> [!NOTE] This repository is designed for test and research in general for [Confluere](https://github.com/codeForEatingEverything/Confluere)
+> [!NOTE]
+> This repository is designed for test and research in general for [Confluere](https://github.com/codeForEatingEverything/Confluere)
 
 ## Table of Content
 1. Basic Implementations
