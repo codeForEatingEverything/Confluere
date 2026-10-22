@@ -1,4 +1,5 @@
-# Simulation-Confluere
+<h1 align="center">Simulation-Confluere</h1>
+
 <p align="center">
 <a href="https://alloy.rs"><img src="https://img.shields.io/badge/Alloy-Framework-orange?logo=rust" alt="alloy"></a>
 <a href="https://bluealloy.github.io/revm"><img src="https://img.shields.io/badge/revm-EVM-yellow?logo=ethereum" alt="revm"></a>
