@@ -3,7 +3,7 @@ pragma solidity 0.8.37;
 
 import {IConfluere} from "../../interfaces/IConfluere.sol";
 import {PoolKey, PoolKeyLib} from "../PoolKey.sol";
-import {Order, SELL, BUY, NC_SELL, NC_BUY, FLAG_ROLLOVER} from "../OrderSet.sol";
+import {Order, SELL, BUY, NC_SELL, NC_BUY, FLAG_ROLLOVER, FLAG_AUTOSELL} from "../OrderSet.sol";
 import {Clearing} from "../Clearing.sol";
 import {SafeCast} from "@openzeppelin/contracts/utils/math/SafeCast.sol";
 import {Settlement} from "../Settlement.sol";
@@ -309,6 +309,13 @@ library ClearingLogic {
         ps.assetBal += f;
         if (o.flags & FLAG_ROLLOVER != 0) {
             _settleRollover(s, bt, id, o, f, net);
+        } else if (o.flags & FLAG_AUTOSELL != 0) {
+            // the source pool's defaulted asset moves here; its C holders get the net proceeds. The R minted to the
+            // core is never repaid: these units take this pool's normal window (auction or default).
+            PoolState storage op = s.pools[s.linkedPool[bt.poolId][id]];
+            op.assetBal -= f;
+            op.autoSellUnits -= uint96(f);
+            op.quoteBal += net;
         } else {
             s.pending[ps.key.quote][owner] += net;
         }

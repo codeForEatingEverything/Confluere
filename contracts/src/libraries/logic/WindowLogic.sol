@@ -3,7 +3,8 @@ pragma solidity 0.8.37;
 
 import {IConfluere} from "../../interfaces/IConfluere.sol";
 import {PoolKeyLib, Kind, Status} from "../PoolKey.sol";
-import {Order, Book, BID} from "../OrderSet.sol";
+import {Order, Book, OrderSet, SELL, BID, FLAG_AUTOSELL} from "../OrderSet.sol";
+import {PoolKey} from "../PoolKey.sol";
 import {Clearing} from "../Clearing.sol";
 import {Settlement} from "../Settlement.sol";
 import {CoreState, PoolState, Params, ParamsLib, CoreLib} from "../State.sol";
@@ -214,6 +215,7 @@ library WindowLogic {
                 ps.shortMargin = 0;
             }
         }
+        if (ps.status == Status.Selling) return _finishSelling(s, ps);
         if (ps.status != Status.Closing) revert IConfluere.InvalidState();
 
         Book storage bk = s.books[poolId][BID];
@@ -223,11 +225,92 @@ library WindowLogic {
             s.removeWithRefund(poolId, ps, id, CoreLib.RM_BID_CLOSED);
         }
         if (bk.head == 0) {
+            _burnCoreR(s, ps, poolId);
             _splitEscrow(s, pr, ps, poolId);
-            ps.status = Status.Closed;
-            emit IConfluere.WindowClosed(poolId, ps.quoteBal, ps.assetBal, ps.surplusBal);
+            if (ps.autoSell && ps.assetBal != 0 && _placeAutoSell(s, pr, ps, poolId)) {
+                ps.status = Status.Selling;
+            } else {
+                ps.status = Status.Closed;
+                emit IConfluere.WindowClosed(poolId, ps.quoteBal, ps.assetBal, ps.surplusBal);
+            }
             return true;
         }
+    }
+
+    /// @dev R held by the core came from autoSell fills of an older pool; it is never repaid. Burn it and move its
+    /// share of the auction surplus to this pool's C holders (choice B2), so nothing is left unclaimable.
+    function _burnCoreR(CoreState storage s, PoolState storage ps, bytes32 poolId) private {
+        uint256 rId = poolId.rId();
+        uint256 r = s.balanceOf[address(this)][rId];
+        if (r == 0) return;
+        uint256 x = Settlement.share(r, ps.surplusBal, s.totalSupply[rId]);
+        ps.surplusBal -= x;
+        ps.quoteBal += x;
+        s.burn(address(this), rId, r);
+    }
+
+    /// @dev Decision B: offer the defaulted asset as a competitive sell at K x discount in the same market's next
+    /// expiry pool of the same tier, owned by the core and linked back to this pool. False (the pool just closes and
+    /// pays in kind) when that pool does not exist, no longer trades, or its sell book is full of better orders.
+    function _placeAutoSell(CoreState storage s, Params memory pr, PoolState storage ps, bytes32 poolId)
+        private
+        returns (bool)
+    {
+        PoolKey memory k = ps.key;
+        k.expiry += pr.period();
+        bytes32 target = PoolKeyLib.toId(k);
+        PoolState storage tp = s.pools[target];
+        if (tp.status != Status.Open || block.timestamp >= k.expiry) return false;
+        uint64 id = _writeAutoSell(s, pr, ps, target, tp.settleCount, poolId);
+        if (!_insertAutoSell(s, pr, target, id)) return false;
+        Order storage o = s.orders[target][id];
+        ps.autoSellPool = target;
+        ps.autoSellOrder = id;
+        ps.autoSellUnits = o.units;
+        emit IConfluere.AutoSellPlaced(poolId, target, id, o.units, o.limit);
+        return true;
+    }
+
+    function _insertAutoSell(CoreState storage s, Params memory pr, bytes32 target, uint64 id) private returns (bool) {
+        uint64 hint = OrderSet.findHint(s.books[target][SELL], s.orders[target], SELL, s.orders[target][id].limit);
+        if (s.tryInsert(pr, target, s.pools[target], id, hint)) return true;
+        delete s.orders[target][id];
+        delete s.linkedPool[target][id];
+        return false;
+    }
+
+    /// @dev The autoSell order: all of the defaulted asset (capped at uint96), limit K x discount (at least 1).
+    function _writeAutoSell(
+        CoreState storage s,
+        Params memory pr,
+        PoolState storage ps,
+        bytes32 target,
+        uint32 targetSettleCount,
+        bytes32 poolId
+    ) private returns (uint64 id) {
+        uint256 units = ps.assetBal > type(uint96).max ? type(uint96).max : ps.assetBal;
+        uint256 limit = uint256(ps.key.strike) * pr.autoSellDiscountBps() / Clearing.BPS;
+        id = s.newOrderId();
+        Order storage o = s.orders[target][id];
+        o.owner = address(this);
+        o.side = SELL;
+        o.flags = FLAG_AUTOSELL;
+        o.deadline = targetSettleCount + pr.autoSellTtl();
+        o.units = uint96(units);
+        o.limit = uint96(limit == 0 ? 1 : limit);
+        s.linkedPool[target][id] = poolId;
+    }
+
+    /// @dev A Selling pool waits for its order; once the order can no longer trade (ttl used up, or the target pool
+    /// stopped trading) anyone can end it here, so Selling always ends by the target's expiry at the latest.
+    function _finishSelling(CoreState storage s, PoolState storage ps) private returns (bool) {
+        bytes32 target = ps.autoSellPool;
+        PoolState storage tp = s.pools[target];
+        Order storage o = s.orders[target][ps.autoSellOrder];
+        bool trading = tp.status == Status.Open && block.timestamp < tp.key.expiry;
+        if (trading && o.deadline > tp.settleCount) revert IConfluere.InvalidState();
+        s.removeWithRefund(target, tp, ps.autoSellOrder, CoreLib.RM_EXPIRED);
+        return true;
     }
 
     /// @dev The spread escrow splits once, by the fraction of filled units whose K was paid in full: that part goes
