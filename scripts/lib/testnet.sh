@@ -201,8 +201,8 @@ verify_stage() {
   for a in $(python3 - "$f" <<'PY'
 import json, sys
 d = json.load(open(sys.argv[1]))
-keys = ["confluere", "router", "wrapperFactory", "vaultFactory", "keeperReceiver", "seatRegistry"]
-out = [d[k] for k in keys if k in d] + [v for v in (d.get("vaults") or {}).values()]
+keys = ["confluere", "router", "wrapperFactory", "vaultFactory", "keeperReceiver", "seatRegistry", "positionMarket"]
+out = [d[k] for k in keys if k in d] + [v for m in ("vaults", "seatLPTokens") for v in (d.get(m) or {}).values()]
 print(" ".join(a for a in out if int(a, 16) != 0))
 PY
   ); do
@@ -221,7 +221,7 @@ PY
 }
 
 # keep_records STAGE: a Deploy re-run rewrites the whole deployments file (Deploy.s.sol _write) and so leaves out the
-# .pools, .vaults and .positionMarket that later steps recorded. When the staged file names the same core as deployments/<chain>.json,
+# .pools, .vaults, .positionMarket and .seatLPTokens that later steps recorded. When the staged file names the same core as deployments/<chain>.json,
 # those records still describe live contracts of that core: copy them back into the stage (they are verified with it).
 # A stage that names another core starts empty, as it should.
 keep_records() {
@@ -230,7 +230,7 @@ keep_records() {
 import json, sys
 old, new = (json.load(open(f)) for f in sys.argv[1:3])
 if str(old.get("confluere", "")).lower() == str(new.get("confluere", "")).lower() != "":
-    kept = [k for k in ("pools", "vaults", "positionMarket") if k in old and k not in new]
+    kept = [k for k in ("pools", "vaults", "positionMarket", "seatLPTokens") if k in old and k not in new]
     for k in kept:
         new[k] = old[k]
     if kept:
