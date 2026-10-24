@@ -44,6 +44,10 @@ contract MedusaHarness {
         c.grid = GridConfig(ANCHOR, WEEK, 30 minutes, 4);
         c.maxOrdersPerSide = 6;
         c.maxBids = 4;
+        c.autoSellDiscountBps = 9000;
+        c.autoSellTtl = 4;
+        c.lendCutoff = 12 hours;
+        c.specials = address(this);
         c.chains = new Confluere.ChainParams[](1);
         c.chains[0].chainId = block.chainid;
         c.chains[0].windowBlocks = 50;
