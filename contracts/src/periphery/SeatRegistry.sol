@@ -190,7 +190,9 @@ contract SeatRegistry is ReentrancyGuardTransient {
         uint256 last = v.lastClearingPrice;
         uint256 valuedAt = v.key.strike;
         if (last != 0) {
-            if (p.side == BUY ? p.limit < last * (BPS - v.bandBps) / BPS : p.limit > last * (BPS + v.bandBps) / BPS) {
+            if (p.side == BUY
+                    ? p.limit < last * (BPS - v.key.bandBps) / BPS
+                    : p.limit > last * (BPS + v.key.bandBps) / BPS) {
                 revert InvalidParams();
             }
         } else if (p.side == BUY && p.limit < valuedAt) {
