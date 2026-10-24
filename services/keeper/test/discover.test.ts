@@ -27,7 +27,7 @@ describe("Discovery", () => {
     const d = new Discovery(c, CORE, FACTORY, 0n, 100n);
     await d.scan();
     expect(queries).toHaveLength(2);
-    expect(queries.find((q) => q.address === CORE)!.events!.map((e) => e.name)).toEqual(["PoolCreated", "OrderPlaced"]);
+    expect(queries.find((q) => q.address === CORE)!.events!.map((e) => e.name)).toEqual(["PoolCreated", "OrderPlaced", "AutoSellPlaced"]);
     expect([...d.pools]).toEqual([P1]);
     expect([...d.touched]).toEqual([P2]);
   });

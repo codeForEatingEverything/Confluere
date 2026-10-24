@@ -28,7 +28,7 @@ export type MockPool = {
   settleCount?: number;
   nextBatchAt: number;
   /** resting orders per side, head first */
-  book?: Partial<Record<number, { id: bigint; deadline: number; rolloverSource?: Hex }[]>>;
+  book?: Partial<Record<number, { id: bigint; deadline: number; rolloverSource?: Hex; autoSellSource?: Hex }[]>>;
 };
 
 export type MockVault = {
@@ -86,7 +86,7 @@ export function mockChain(state: {
     switch (fn) {
       case "pool":
         return {
-          key: { asset: p?.asset ?? ZERO, quote: p?.quote ?? ZERO, expiry: BigInt(p?.expiry ?? 0), strike: 1n, kind: p?.kind ?? 0 },
+          key: { asset: p?.asset ?? ZERO, quote: p?.quote ?? ZERO, expiry: BigInt(p?.expiry ?? 0), strike: 1n, kind: p?.kind ?? 0, bandBps: 800, cadence: 0 },
           status: p?.status ?? Status.None,
           batchInterval: 0,
           windowEnd: p?.windowEnd ?? 0n,
@@ -101,11 +101,12 @@ export function mockChain(state: {
       }
       case "order": {
         const f = orderOf(pid, args[1] as bigint);
-        if (!f) return [ZERO, 0, 0n, 0n, 0n, 0, 0n];
-        return ["0x00000000000000000000000000000000000000aa", f.side, 1n, 1n, 1n, f.o.deadline, f.next];
+        if (!f) return [ZERO, 0, 0, 0n, 0n, 0n, 0, 0n];
+        const flags = f.o.rolloverSource ? 1 : f.o.autoSellSource ? 4 : 0;
+        return ["0x00000000000000000000000000000000000000aa", f.side, flags, 1n, 1n, 1n, f.o.deadline, f.next];
       }
-      case "rolloverSource":
-        return orderOf(pid, args[1] as bigint)?.o.rolloverSource ?? ZERO32;
+      case "linkedPool":
+        return orderOf(pid, args[1] as bigint)?.o.rolloverSource ?? orderOf(pid, args[1] as bigint)?.o.autoSellSource ?? ZERO32;
       case "expiryWindowEnd":
         return state.expiryWindowEnd?.[Number(args[0])] ?? 0n;
       case "graduated":

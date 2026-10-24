@@ -268,6 +268,20 @@ describe("keeper purge", () => {
     expect(w.map((c) => c.args)).toEqual([[pid(1), [7n]]]);
   });
 
+  it("does not purge a live autoSell sell while its source pool is Selling", async () => {
+    const s = setup(
+      {
+        [pid(1)]: open(A, { settleCount: 5, book: { [Side.Sell]: [{ id: 7n, deadline: 50, autoSellSource: OLD }] } }),
+        [OLD]: open(A, { status: Status.Selling, expiry: NOW - 6000, windowEnd: 900n }),
+      },
+      {},
+      { passes: new Set(["purge"]) },
+    );
+    await s.run();
+    expect(s.calls.filter((c) => c.method === "write" && c.fn === "purge")).toHaveLength(0);
+    expect(s.calls.filter((c) => c.fn === "linkedPool")).toHaveLength(0);
+  });
+
   it("retries a purge that failed instead of marking the pool done", async () => {
     let failures = 1;
     const s = setup({ [pid(1)]: open(A, { status: Status.Closed, book: { [Side.Buy]: [{ id: 9n, deadline: 99 }] } }) }, {}, {
