@@ -22,7 +22,11 @@ contract ClearingFuzzTest is Base {
         assertEq(rSupply, _reference(), "volume == reference max crossing");
         assertEq(core.totalSupply(_c(pid)), rSupply, "C == R");
         assertEq(core.pool(pid).assetBal, rSupply);
-        assertEq(usdc.balanceOf(address(core)), _pendQ() + _escQ(pid) + core.pool(pid).quoteBal, "quote conserved");
+        assertEq(
+            usdc.balanceOf(address(core)),
+            _pendQ() + _escQ(pid) + core.pool(pid).quoteBal + core.pool(pid).feeEscrow,
+            "quote conserved"
+        );
     }
 
     function _placeRandom(bytes32 pid, uint256 seed) internal {
@@ -58,7 +62,7 @@ contract ClearingFuzzTest is Base {
 
     function _pendQ() internal view returns (uint256) {
         return _pend(address(usdc), alice) + _pend(address(usdc), dave) + _pend(address(usdc), bob)
-            + _pend(address(usdc), carol);
+            + _pend(address(usdc), carol) + _pend(address(usdc), treasury);
     }
 
     function _escQ(bytes32 pid) internal view returns (uint256 escQ) {
@@ -68,17 +72,12 @@ contract ClearingFuzzTest is Base {
         }
     }
 
-    function testFuzz_feeNeverExceedsRepay(uint96 units, uint96 strike, uint96 vwap_, uint16 feeBps, uint8 dec)
-        public
-        pure
-    {
-        dec = uint8(bound(dec, 0, 30));
-        feeBps = uint16(bound(feeBps, 0, 10_000));
-        uint256 scale = 10 ** uint256(dec);
-        uint256 pay = Settlement.repayAmount(units, strike, scale);
-        uint256 fee = Settlement.fee(units, strike, vwap_, feeBps, scale);
-        assertLe(fee, pay);
-        if (vwap_ >= strike) assertEq(fee, 0);
+    function testFuzz_sellSplitNeverUnderflows(uint96 units, uint96 price, uint96 strike, uint8 dec) public pure {
+        uint256 scale = 10 ** uint256(bound(dec, 0, 30));
+        (uint256 gross, uint256 spread, uint256 trade, uint256 net) = Settlement.sellSplit(units, price, strike, scale);
+        assertEq(gross, spread + trade + net);
+        if (price >= strike) assertEq(spread, 0);
+        assertLe(spread, Settlement.spreadShare(units, strike, price, scale));
     }
 
     function testFuzz_roundingFavoursPool(uint96 units, uint96 price, uint8 dec) public pure {
@@ -96,12 +95,12 @@ contract ClearingFuzzTest is Base {
     }
 
     /// Solady's mulDiv equals plain arithmetic where the plain form cannot overflow: carries PlainMathHalmos over.
-    function testFuzz_soladyMatchesPlain(uint64 a, uint64 b, uint16 feeBps, uint64 c) public pure {
+    function testFuzz_soladyMatchesPlain(uint64 a, uint64 b, uint64 c) public pure {
         uint256 s = 1e18;
         assertEq(Clearing.quoteDown(a, b, s), uint256(a) * b / s);
         assertEq(Clearing.quoteUp(a, b, s), (uint256(a) * b + s - 1) / s);
         if (b > 0) assertEq(Clearing.unitsFor(a, b, s), uint256(a) * s / b);
-        if (c > b) assertEq(Settlement.fee(a, c, b, feeBps, s), uint256(a) * (c - b) * feeBps / (s * 10_000));
+        if (c > b) assertEq(Settlement.spreadShare(a, c, b, s), uint256(a) * (c - b) * 500 / (s * 10_000));
         assertEq(Settlement.repayAmount(a, c, s), (uint256(a) * c + s - 1) / s);
     }
 
