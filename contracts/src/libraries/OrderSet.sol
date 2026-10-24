@@ -11,6 +11,7 @@ uint8 constant BID = 4;
 
 uint8 constant FLAG_ROLLOVER = 1;
 uint8 constant FLAG_LOCKED = 2; // cannot be cancelled while it can still trade (commitment orders, e.g. seats)
+uint8 constant FLAG_AUTOSELL = 4; // a closed pool's defaulted asset offered in the next expiry's pool; owner is the core
 
 /// @notice One resting order. Ids are global and never reused.
 /// - SELL / NC_SELL: `units` of asset escrowed; `limit` is the minimum price (0 for NC).
