@@ -153,16 +153,23 @@ testnet_env() {
   CHAIN_ID=$(rcast chain-id --rpc-url "$R")
 }
 
-# The graduation / order-minimum rows of both testnets (Deploy.s.sol GRAD_<chainId>):
+# The graduation / order-minimum rows of the three testnets (Deploy.s.sol GRAD_<chainId>):
 # quote:graduationVolume:minNotional:seatObligation, small testnet values (USDC min order 0.0001, native 0.001).
 # Graduation needs this volume in each of four consecutive expiries: 0.001 USDC and 0.1 native, so the small seeds of
-# scripts/roll-testnet.sh (SEED_UNIT_BPS=100) graduate a market and let the vaults invest; scripts/test/grad-seed.test.sh
-# checks one seed clears them. The whole table is part of the core's init code (both chains carry every row, so they
-# share one core address): changing any value here and redeploying gives a NEW core address on both chains; redeploy
-# both and regenerate the SDK and CRE configs (scripts/deploy-testnet.sh does).
+# scripts/roll-testnet.sh graduate the native/USDC market and let the vaults invest; scripts/test/grad-seed.test.sh
+# checks one seed clears them. The whole table is part of the core's init code (every chain carries every row, so they
+# share one core address): changing any value here and redeploying gives a NEW core address on every chain. Adding
+# GRAD_11155111 (2026-10-23) did exactly that: the live Monad / HyperEVM core 0x7E02…b1f7 was deployed without it, so
+# Sepolia gets another address until both are redeployed on TESTNET_SALT_NEXT (founder's call; see TESTNET_SALT).
+# A redeploy regenerates the SDK and CRE configs (scripts/deploy-testnet.sh does).
+# Sepolia's native row is not cheap like WMON / WHYPE: 0.1 WETH (~240 USD) is both the per-expiry graduation volume
+# of the WETH-quoted wstETH/WETH market and the seat obligation of a seat on it, all from faucet ETH, so that market
+# (and the pegged vault) will in practice not graduate. It is in the init code of the 0xc0f3 core already deployed on
+# Sepolia (2026-10-23); pick a smaller value (e.g. 0.01 WETH) before the next joint redeploy (IMPLEMENTATION_NOTES §7).
 testnet_grad() {
   export GRAD_10143="$M_WMON:100000000000000000:1000000000000000:100000000000000000,$M_USDC:1000:100:100000"
   export GRAD_998="$H_WHYPE:100000000000000000:1000000000000000:100000000000000000,$H_USDC:1000:100:100000"
+  export GRAD_11155111="$S_WETH:100000000000000000:1000000000000000:100000000000000000,$S_USDC:1000:100:100000"
 }
 
 # File mtime in seconds: GNU stat (Linux) first, BSD stat (macOS) second.
