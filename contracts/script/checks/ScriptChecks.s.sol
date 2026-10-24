@@ -194,7 +194,7 @@ contract ScriptChecks is Script {
         vm.setEnv("SALT", vm.toString(bytes32(uint256(0xc0f3))));
         Confluere core = new Deploy().run();
         require(core.WINDOW_BLOCKS() == 600 && core.grid().period == 1 days, "sepolia: window / grid");
-        require(core.graduationVolume(weth) == 1e17 && core.minNotional(usdc) == 100, "sepolia: GRAD row");
+        require(core.graduationFee(weth) == 1e17 && core.minNotional(usdc) == 100, "sepolia: GRAD row");
         require(vm.parseJsonUint(vm.readFile(file), ".chainId") == 11_155_111, "sepolia: chain id not recorded");
         vm.setEnv("GRID", "");
         vm.setEnv("DEMO", "true");
@@ -364,7 +364,7 @@ contract ScriptChecks is Script {
         }
         for (uint256 i; i < ids.length; ++i) {
             IConfluere.PoolView memory v = core.pool(ids[i]);
-            uint256 threshold = core.graduationVolume(v.key.quote);
+            uint256 threshold = core.graduationFee(v.key.quote);
             uint256 vol =
                 core.marketStats(PoolKeyLib.marketId(v.key.asset, v.key.quote, v.key.kind), v.key.expiry).volume;
             require(threshold != 0, "no GRAD row for this quote");

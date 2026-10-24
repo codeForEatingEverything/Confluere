@@ -88,7 +88,7 @@ library DeployConfig {
         p.guardian = guardian;
         // Empty means no market can graduate on that chain (and vaults never invest there), and no order minimum.
         p.graduationQuotes = g.quotes;
-        p.graduationVolumes = g.volumes;
+        p.graduationFees = g.volumes;
         p.minNotionalQuotes = g.quotes;
         p.minNotionals = g.minNotionals;
     }
