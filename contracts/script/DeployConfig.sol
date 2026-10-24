@@ -50,17 +50,11 @@ library DeployConfig {
     {
         bool demo = preset == Preset.Demo;
         if (preset == Preset.Demo) {
-            c.grid = GridConfig({
-                anchor: FRIDAY_ANCHOR, period: 1 hours, batchInterval: 2 minutes, maxExpiries: 4, strikeSigDigits: 2
-            });
+            c.grid = GridConfig({anchor: FRIDAY_ANCHOR, period: 1 hours, batchInterval: 2 minutes, maxExpiries: 4});
         } else if (preset == Preset.Daily) {
-            c.grid = GridConfig({
-                anchor: FRIDAY_ANCHOR, period: 1 days, batchInterval: 2 minutes, maxExpiries: 15, strikeSigDigits: 2
-            });
+            c.grid = GridConfig({anchor: FRIDAY_ANCHOR, period: 1 days, batchInterval: 2 minutes, maxExpiries: 15});
         } else {
-            c.grid = GridConfig({
-                anchor: FRIDAY_ANCHOR, period: 7 days, batchInterval: 30 minutes, maxExpiries: 4, strikeSigDigits: 2
-            });
+            c.grid = GridConfig({anchor: FRIDAY_ANCHOR, period: 7 days, batchInterval: 30 minutes, maxExpiries: 4});
         }
         c.maxOrdersPerSide = 128; // ~6.6M gas worst case: fits Monad blocks and HyperEVM big blocks
         c.maxBids = 64;
