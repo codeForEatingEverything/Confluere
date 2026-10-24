@@ -155,7 +155,7 @@ export function every(seconds: number): string {
 export function nativeSymbol(chainId: number): string {
   if (chainId === 143 || chainId === 10143) return "MON";
   if (chainId === 999 || chainId === 998) return "HYPE";
-  return "ETH";
+  return "ETH"; // Ethereum and Sepolia (11155111), anvil
 }
 
 /** Vault symbols say NATIVE; show the chain's coin instead (rvNATIVE-Pegged -> rvMON-Pegged). */

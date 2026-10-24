@@ -2,14 +2,18 @@
  * Chain registry (pure, no React): which networks the app serves, their RPCs, deployments and display names.
  * Every data path looks its chain up here by id; nothing reads a build-time "the chain" constant.
  *
- * - HyperEVM testnet (998) and Monad testnet (10143) are always on; anvil (31337) only with NEXT_PUBLIC_ENABLE_ANVIL=1.
+ * - HyperEVM testnet (998), Monad testnet (10143) and Ethereum Sepolia (11155111) are always on; anvil (31337) only
+ *   with NEXT_PUBLIC_ENABLE_ANVIL=1. A served network may have no deployment yet (Sepolia until deployments/sepolia.json
+ *   exists and `pnpm codegen` ran): it is still selectable, `deploymentOf` is undefined and the screens show a calm
+ *   "not deployed yet" state (components/layout/NotDeployed); it lights up with the next build that has the deployment.
  * - Default read chain: NEXT_PUBLIC_DEFAULT_CHAIN_ID, else 998 (it has live graduated markets).
  * - RPC per chain: NEXT_PUBLIC_RPC_URL_<id> overrides the primary; HyperEVM defaults to Chainlink's public endpoint
- *   (the official one rate-limits per IP), with the official endpoint as a fallback. Multicall3 exists on both
- *   testnets (eth_getCode verified 2026-10-12), so reads batch into one eth_call.
+ *   (the official one rate-limits per IP), with the official endpoint as a fallback; Sepolia to publicnode, then
+ *   thirdweb (viem's default). Multicall3 exists on every served testnet (eth_getCode verified 2026-10-12, Sepolia's
+ *   is in viem's chain definition), so reads batch into one eth_call.
  */
 import { deployments, type Deployment } from "@confluere/sdk";
-import { anvil, hyperliquidEvmTestnet, monadTestnet } from "viem/chains";
+import { anvil, hyperliquidEvmTestnet, monadTestnet, sepolia } from "viem/chains";
 import type { Chain } from "viem";
 import { isDemo } from "./demo/mode";
 import { demoDeploymentOf } from "./demo/deployments";
@@ -18,6 +22,7 @@ export const MULTICALL3 = "0xcA11bde05977b3631167028862bE2a173976CA11" as const;
 
 export const HYPER_TESTNET = 998;
 export const MONAD_TESTNET = 10143;
+export const SEPOLIA = 11155111;
 export const ANVIL = 31337;
 
 const hyperTestnet: Chain = {
@@ -53,6 +58,7 @@ const env = (k: string): string | undefined => {
 const ENV: Record<string, string | undefined> = {
   NEXT_PUBLIC_RPC_URL_998: process.env.NEXT_PUBLIC_RPC_URL_998,
   NEXT_PUBLIC_RPC_URL_10143: process.env.NEXT_PUBLIC_RPC_URL_10143,
+  NEXT_PUBLIC_RPC_URL_11155111: process.env.NEXT_PUBLIC_RPC_URL_11155111,
   NEXT_PUBLIC_RPC_URL_31337: process.env.NEXT_PUBLIC_RPC_URL_31337,
   NEXT_PUBLIC_ENABLE_ANVIL: process.env.NEXT_PUBLIC_ENABLE_ANVIL,
   NEXT_PUBLIC_DEFAULT_CHAIN_ID: process.env.NEXT_PUBLIC_DEFAULT_CHAIN_ID,
@@ -61,6 +67,8 @@ const ENV: Record<string, string | undefined> = {
 const uniq = (xs: (string | undefined)[]) => [...new Set(xs.filter((x): x is string => !!x))];
 
 export const CHAINLINK_HYPER_TESTNET_RPC = "https://rpcs.chain.link/hyperevm/testnet";
+/** Sepolia reads: publicnode (no key, generous limits; its log history is pruned, see lib/server/chainIndex). */
+export const PUBLICNODE_SEPOLIA_RPC = "https://ethereum-sepolia-rpc.publicnode.com";
 
 const ALL: ChainMeta[] = [
   {
@@ -82,6 +90,16 @@ const ALL: ChainMeta[] = [
     testnet: true,
     slug: "monad",
     rpcs: uniq([env("NEXT_PUBLIC_RPC_URL_10143"), "https://testnet-rpc.monad.xyz"]),
+  },
+  {
+    id: SEPOLIA,
+    chain: sepolia,
+    name: "Sepolia",
+    label: "Sepolia testnet",
+    native: "ETH",
+    testnet: true,
+    slug: "sepolia",
+    rpcs: uniq([env("NEXT_PUBLIC_RPC_URL_11155111"), PUBLICNODE_SEPOLIA_RPC, ...sepolia.rpcUrls.default.http]),
   },
   {
     id: ANVIL,
