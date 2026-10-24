@@ -73,11 +73,19 @@ contract Deploy is Script {
         (, address deployer,) = vm.readCallers();
         Tokens memory t = mocks ? _mockTokens(salt) : Tokens(address(0), address(0), address(0));
         DeployConfig.Grad[7] memory grad = _grad(mocks, t);
-        (address[7] memory registries, SeatRegistry reg) = _registries(salt, deployer, grad);
-        Guardian g = _deployGuardian(salt, deployer);
-        address guardian = address(g) != address(0) ? address(g) : vm.envAddress("GUARDIAN");
-        Specials sp = _deploySpecials(salt, deployer);
-        Confluere.Config memory cfg = DeployConfig.build(preset, registries, guardian, grad, address(sp));
+        Confluere.Config memory cfg;
+        SeatRegistry reg;
+        Guardian g;
+        address guardian;
+        Specials sp;
+        {
+            address[7] memory registries;
+            (registries, reg) = _registries(salt, deployer, grad);
+            g = _deployGuardian(salt, deployer);
+            guardian = address(g) != address(0) ? address(g) : vm.envAddress("GUARDIAN");
+            sp = _deploySpecials(salt, deployer);
+            cfg = DeployConfig.build(preset, registries, guardian, grad, address(sp));
+        }
         _preflight(cfg, preset);
         uint256 deployBlock;
         (core, deployBlock) = _deployCore(salt, cfg, reg, g);
