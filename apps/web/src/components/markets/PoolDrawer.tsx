@@ -18,7 +18,7 @@ import { poolDue } from "@/lib/due";
 import { netReturn, rateText, refToUnits } from "@/lib/quote";
 import { ADVANCE_LABEL, advanceWrite, offerHeld, offerWrites } from "@/lib/proActions";
 import { windowLeft } from "@/lib/deadline";
-import { fmtChip, fmtClock, fmtExpiry, fmtPer, fmtToken, fmtWait, parseAmount } from "@/lib/format";
+import { fmtChip, fmtClock, fmtExpiry, fmtPer, fmtToken, fmtWait, parseAmount, pct } from "@/lib/format";
 import { buyBack, lastTraded, misses, nextRoundAt, poolState, priceGuardBps, roundSeconds, unitScale } from "@/lib/view";
 import { positionName, priceSource, type PositionKind } from "@/lib/vocab";
 import { sortBest, tokenIdOf, usePositionBook } from "@/lib/secondary";
@@ -83,7 +83,8 @@ function PoolBody({ pool, A, Q }: { pool: PoolRow; A: Token; Q: Token }) {
         <Stat label="Matures" value={fmtChip(pool.expiry)} note={pool.expiry > now ? `in ${fmtWait(pool.expiry - now)} (UTC)` : "UTC"} />
         <Stat label="Status" value={state === "open" ? "Open" : stateShort(state)} note={state === "open" ? `next round in ${fmtWait(nextRoundAt(pool, now) - now)}` : stateWord(pool, now, block, spb)} />
         <Stat label="Outstanding" value={sup ? fmtToken(sup.r, A, true, { compact: true }) : "—"} note="collateral sold into this market" />
-        <Stat label="Fee" value={`${(pool.feeBps / 100).toLocaleString("en-US")}%`} note="of the interest, only if repaid" />
+        <Stat label="Fee" value="5% · 0.03%" note="5% of the interest from borrowers, 0.015% per side of each trade" />
+        <Stat label="Fee escrow" value={pool.feeEscrow > 0n ? fmtToken(pool.feeEscrow, Q, true, { compact: true }) : "—"} note={pool.filledUnits > 0n ? `${pct(Number(pool.repaidUnits) / Number(pool.filledUnits), 0)} repaid so far; the unpaid part goes to lenders at close` : "split at close by the share repaid"} />
         <Stat label="Borrower offers" value={offersSell !== undefined ? fmtToken(offersSell, A, true, { compact: true }) : "—"} />
         <Stat label="Lender offers" value={offersBuy !== undefined ? fmtToken(offersBuy, Q, true, { compact: true }) : "—"} />
       </div>

@@ -2,7 +2,7 @@
 
 /**
  * Earn (IA v3.1 item 4): vaults only. Lending into one maturity yourself means getting C on the Borrow market page.
- * A vault opens its drawer (?vault=, shareable). Rates are net of the protocol's share of the interest.
+ * A vault opens its drawer (?vault=, shareable). Rates are net of the 0.015% trade fee.
  */
 import Link from "next/link";
 import { useMemo } from "react";
@@ -60,7 +60,7 @@ export function EarnScreen() {
         <SectionTitle id="vaults-title">Vaults</SectionTitle>
         <VaultRows vaults={vaults.data} loading={(vaults.isLoading || metaMissing) && !vaults.data} failed={vaults.isError && !vaults.data} onRetry={retry} tokens={tokens} open={open} now={now} onOpen={(a, pay) => setVault(a, { pay })} />
         <p className="mt-3 text-caption text-ink-3">
-          Rates are what the vault would earn right now, after the protocol&apos;s share of the interest. Prefer to choose a maturity yourself?{" "}
+          Rates are what the vault would earn right now, after the 0.015% trade fee. Withdrawals are paid in one token. Prefer to choose a maturity yourself?{" "}
           <Link href="/borrow" className="link">
             Lend in one market
           </Link>

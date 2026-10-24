@@ -17,7 +17,7 @@ import { launchTokensOf } from "@/lib/chains";
 import { useAccountOrders, useBlockTime, useMinNotional, type PoolRow, type Token } from "@/lib/data";
 import { useBalances, usePending, usePositions } from "@/lib/position";
 import { useActionCtx, useChainClock } from "@/lib/useProduct";
-import { borrowQuote, defaultBorrowLimit, defaultMoveBps, minUnits, refToUnits, type BorrowQuote } from "@/lib/quote";
+import { borrowQuote, defaultBorrowLimit, defaultMoveBps, minUnits, netAtPrice, refToUnits, type BorrowQuote } from "@/lib/quote";
 import { repayDeadline, type Deadline } from "@/lib/deadline";
 import { borrowWrites } from "@/lib/actions";
 import { defaultTtl } from "@/lib/order";
@@ -115,7 +115,8 @@ export function useBorrowOrder({ pool, A, Q, amount, ref, payNative = false, rec
   const limitTooHigh = ownPrice && !!pool && limit >= bbPrice;
   const limitLow = ownPrice && !!anchor && limit > 0n && limit < (anchor * 9n) / 10n;
   const scale = pool ? scaleOf(pool.assetDecimals) : 1n;
-  const floor = q && pool && !ownPrice ? quoteDown(show, q.guard, scale) : undefined;
+  // net of the v0.8 fees at the guard price: 0.015% trade fee and 5% of (buy-back − price)
+  const floor = q && pool && !ownPrice ? netAtPrice(pool, show, q.guard) : undefined;
 
   const sym = payToken?.symbol ?? "";
   let label: string;
@@ -256,9 +257,9 @@ export function BorrowTerms({ o, testId = "borrow-terms", collapsible = false, t
         { k: `You receive${per}`, v: <>{o.ownPrice ? "at least " : "≈ "}{fmtToken(qs.receive, Q)}</>, hint: o.floor !== undefined && o.units > 0n ? `at least ${fmtToken(o.floor, Q)} (price may move ${o.move / 100}%)` : undefined },
         { k: `Repay${per}`, v: fmtToken(qs.repay, Q), testId: "row-repay" },
         { k: "Repay by", v: <DeadlineText o={o} />, hint: left > 0 ? `in ${fmtWait(left)}${repaysAnyTime(pool) ? ", any time before" : ", only after maturity"}` : undefined },
-        { k: "Interest", v: fmtToken(qs.repay - qs.receive > 0n ? qs.repay - qs.receive : 0n, Q) },
+        { k: "Interest", v: fmtToken(qs.repay - qs.receive > 0n ? qs.repay - qs.receive : 0n, Q), hint: "fees included" },
         vsMarket !== undefined && { k: "Buy-back price", v: `${fmtPer(o.bbPrice, Q)} ${Q.symbol}`, hint: `${vsMarket >= 0 ? "+" : ""}${pct(vsMarket, 1)} vs market (reference)` },
-        { k: "Fee", v: "None" },
+        { k: "Fees", v: fmtToken(qs.tradeFee + qs.spreadShare, Q), hint: `0.015% trade fee ${fmtToken(qs.tradeFee, Q)} + 5% of the interest ${fmtToken(qs.spreadShare, Q)}; nothing on repay`, testId: "row-fees" },
       ]}
     />
   );
@@ -333,7 +334,7 @@ export function BorrowReview({ o, onPlaced }: { o: BorrowOrder; onPlaced?: () =>
             { k: "Repay by", v: <DeadlineText o={o} />, hint: anyTime ? "any time before" : "only after maturity" },
             o.floor !== undefined && { k: "You receive at least", v: fmtToken(o.floor, Q), hint: "or the order waits for the next round" },
             { k: "Valid for", v: `${o.tries} round${o.tries > 1 ? "s" : ""}`, hint: `≈ ${fmtWait(o.tries * roundSeconds(pool))}` },
-            { k: "Fee", v: "None" },
+            { k: "Fees", v: fmtToken(q.tradeFee + q.spreadShare, Q), hint: "0.015% trade fee + 5% of the interest, taken from what you receive; nothing on repay" },
           ]}
         />
         <OutcomeStrip
