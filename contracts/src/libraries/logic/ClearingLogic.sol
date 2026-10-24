@@ -2,7 +2,7 @@
 pragma solidity 0.8.37;
 
 import {IConfluere} from "../../interfaces/IConfluere.sol";
-import {PoolKeyLib} from "../PoolKey.sol";
+import {PoolKey, PoolKeyLib} from "../PoolKey.sol";
 import {Order, SELL, BUY, NC_SELL, NC_BUY, FLAG_ROLLOVER} from "../OrderSet.sol";
 import {Clearing} from "../Clearing.sol";
 import {SafeCast} from "@openzeppelin/contracts/utils/math/SafeCast.sol";
@@ -91,15 +91,29 @@ library ClearingLogic {
                 s.marketFees[ps.marketId] += bt.trade;
                 CoreLib.addFees(s, ps, bt.trade);
             }
-            IConfluere.MarketStats storage st = s.stats[ps.marketId][ps.key.expiry];
-            // Saturating: the counter only feeds graduation and must never block clearing.
-            uint256 vol = uint256(st.volume) + Clearing.quoteDown(total, bt.price, bt.scale);
-            st.volume = vol > type(uint128).max ? type(uint128).max : uint128(vol);
-            uint96 k = uint96(ps.key.strike);
-            if (st.minStrike == 0 || k < st.minStrike) st.minStrike = k;
-            if (k > st.maxStrike) st.maxStrike = k;
+            _countVolume(s, ps, Clearing.quoteDown(total, bt.price, bt.scale));
         }
         emit IConfluere.BatchSettled(poolId, bt.sc, bt.price, pl.q, total - pl.q, bt.spread, bt.trade, pl.q0);
+    }
+
+    /// @dev Market volume at this expiry, the pool's tier volume, and the main tier as an incremental argmax (O(1);
+    /// ties keep the tier that got there first). Saturating: the counters must never block clearing.
+    function _countVolume(CoreState storage s, PoolState storage ps, uint256 vol) private {
+        PoolKey storage k = ps.key;
+        IConfluere.MarketStats storage st = s.stats[ps.marketId][k.expiry];
+        st.volume = _sat128(uint256(st.volume) + vol);
+        uint256 tv = s.tierVolume[ps.marketId][k.expiry][PoolKeyLib.tierKey(k.strike, k.bandBps, k.cadence)] += vol;
+        if (tv > st.mainVolume) {
+            st.mainVolume = _sat128(tv);
+            st.mainStrike = uint96(k.strike);
+            st.mainIndex = ps.strikeIndex;
+            st.mainBand = k.bandBps;
+            st.mainCadence = k.cadence;
+        }
+    }
+
+    function _sat128(uint256 x) private pure returns (uint128) {
+        return x > type(uint128).max ? type(uint128).max : uint128(x);
     }
 
     function _plan(CoreState storage s, PoolState storage ps, Batch memory bt) private returns (Plan memory pl) {
