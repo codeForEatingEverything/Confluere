@@ -48,11 +48,11 @@ describe("top bar", () => {
     expect(within(nav).getByRole("link", { name: "Earn" }).getAttribute("aria-current")).toBe("page");
   });
 
-  it("More holds Demo and Developers, no theme switch", () => {
+  it("More holds Specials, Demo and Developers, no theme switch", () => {
     wrap(<TopBar />);
     fireEvent.click(screen.getByTestId("more-menu"));
     const menu = screen.getByRole("menu", { name: "More" });
-    expect(within(menu).getAllByRole("menuitem").map((a) => a.textContent)).toEqual(["Demo", "Developers"]);
+    expect(within(menu).getAllByRole("menuitem").map((a) => a.textContent)).toEqual(["Specials", "Demo", "Developers"]);
     expect(within(menu).queryAllByRole("menuitemradio")).toHaveLength(0); // dark only, no theme switch
   });
 
