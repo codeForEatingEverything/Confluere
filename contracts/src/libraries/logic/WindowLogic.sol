@@ -203,17 +203,7 @@ library WindowLogic {
             if (block.number < ps.windowEnd) revert IConfluere.InvalidState();
             ps.status = Status.Closing;
             _syncShort(ps, pr, poolId);
-            // bids only take units that are here; short units nobody repaid default to C holders as their margin
-            uint256 su = ps.shortUnits;
-            uint256 r = s.totalSupply[poolId.rId()];
-            uint256 phys = ps.assetBal - su;
-            ps.closeRemaining = r < phys ? r : phys;
-            if (su != 0) {
-                ps.quoteBal += ps.shortMargin;
-                ps.assetBal -= su;
-                ps.shortUnits = 0;
-                ps.shortMargin = 0;
-            }
+            _closeSharedPot(s, ps, poolId);
         }
         if (ps.status == Status.Selling) return _finishSelling(s, ps);
         if (ps.status != Status.Closing) revert IConfluere.InvalidState();
@@ -234,6 +224,21 @@ library WindowLogic {
                 emit IConfluere.WindowClosed(poolId, ps.quoteBal, ps.assetBal, ps.surplusBal);
             }
             return true;
+        }
+    }
+
+    /// @dev The shared pot at window end (decision A), kept apart from the fee-escrow split: bids only take units that
+    /// are physically here, and short units nobody repaid default to C holders as their forfeited margin.
+    function _closeSharedPot(CoreState storage s, PoolState storage ps, bytes32 poolId) private {
+        uint256 su = ps.shortUnits;
+        uint256 r = s.totalSupply[poolId.rId()];
+        uint256 phys = ps.assetBal - su;
+        ps.closeRemaining = r < phys ? r : phys;
+        if (su != 0) {
+            ps.quoteBal += ps.shortMargin;
+            ps.assetBal -= su;
+            ps.shortUnits = 0;
+            ps.shortMargin = 0;
         }
     }
 
