@@ -19,7 +19,7 @@ echo "cast $*" >> "$CALLS"
 # FAKE_CAST_FAIL=<subcommand>: that read fails every time (an RPC that stays down through rcast's retries)
 [ "${FAKE_CAST_FAIL:-}" != "$1" ] || { echo "Error: connection refused" >&2; exit 1; }
 case "$1" in
-  chain-id) case "$*" in *monad*) echo 10143 ;; *) echo 998 ;; esac ;;
+  chain-id) case "$*" in *monad*) echo 10143 ;; *sepolia*) echo 11155111 ;; *) echo 998 ;; esac ;;
   wallet) echo 0x00000000000000000000000000000000000000Aa ;;
   balance) echo "${FAKE_GAS:-0}" ;;
   code) echo 0x6080 ;;
@@ -28,14 +28,15 @@ case "$1" in
   call)
     case "$3" in
       "decimals()(uint8)")
-        case "$2" in 0x2B3370eE501B4a559b57D449569354196457D8Ab|0x534b2f3A21130d7a60830c2Df862319e593943A3) echo 6 ;; *) echo 18 ;; esac ;;
+        case "$2" in 0x2B3370eE501B4a559b57D449569354196457D8Ab|0x534b2f3A21130d7a60830c2Df862319e593943A3|0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238) echo 6 ;; *) echo 18 ;; esac ;;
       "balanceOf(address)(uint256)")
         case "$2" in
-          0x2B3370eE501B4a559b57D449569354196457D8Ab|0x534b2f3A21130d7a60830c2Df862319e593943A3) echo "${FAKE_BAL_USDC:-${FAKE_BAL:-0}} [x]" ;;
+          0x2B3370eE501B4a559b57D449569354196457D8Ab|0x534b2f3A21130d7a60830c2Df862319e593943A3|0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238) echo "${FAKE_BAL_USDC:-${FAKE_BAL:-0}} [x]" ;;
           *) echo "${FAKE_BAL:-0} [x]" ;;
         esac ;;
       "pool(bytes32)") if [ -n "${FAKE_POOL_SHORT:-}" ]; then echo 0x; else printf '0x%0320d%064x\n' 0 "${FAKE_STATUS:-1}"; fi ;;
       "grid()((uint64,uint64,uint64,uint32,uint8))") echo "(1791532800 [1.791e9], 3600, 120, 4, 2)" ;;
+      "getStETHByWstETH(uint256)(uint256)") echo "1037717825760305089 [1.037e18]" ;; # a fixed answer, whatever the input
     esac ;;
 esac
 EOF
@@ -46,15 +47,16 @@ EOF
 # FAKE_BLOCK (Deploy.s.sol _deployBlock).
 cat > "$T/bin/forge" <<'EOF'
 #!/usr/bin/env bash
-script=$2 sig=run prev="" resume=0 cid=998
+script=$2 sig=run prev="" resume=0 cid=998 sim=1
 for a in "$@"; do
   if [ "$prev" = --sig ]; then sig=${a%%(*}; fi
   [ "$a" = --resume ] && resume=1
-  case "$a" in *monad*) cid=10143 ;; esac
+  [ "$a" = --skip-simulation ] && sim=0
+  case "$a" in *monad*) cid=10143 ;; *sepolia*) cid=11155111 ;; esac
   prev=$a
 done
 key="$(basename "$script" .s.sol).$sig"
-echo "forge $key resume=$resume EXPIRY=${EXPIRY:-} NATIVE=${NATIVE:-} CLAIM_POOLS=${CLAIM_POOLS:-} BPS=${SEED_UNIT_BPS:-} EXTRA=${EXTRA_ASSET:-} XQ=${EXTRA_QUOTE:-} XBPS=${EXTRA_SEED_UNIT_BPS:-}" >> "$CALLS"
+echo "forge $key resume=$resume EXPIRY=${EXPIRY:-} NATIVE=${NATIVE:-} CLAIM_POOLS=${CLAIM_POOLS:-} BPS=${SEED_UNIT_BPS:-} EXTRA=${EXTRA_ASSET:-} XQ=${EXTRA_QUOTE:-} XBPS=${EXTRA_SEED_UNIT_BPS:-} LBPS=${LST_SEED_UNIT_BPS:-} SALT=${SALT:-} GRAD=${GRAD_11155111:+sepolia} sim=$sim" >> "$CALLS"
 if [ -n "${DEPLOYMENTS_FILE:-}" ] && [ $resume = 0 ]; then
   python3 - "$key" "$cid" <<'PY'
 import json, os, sys
@@ -80,6 +82,10 @@ elif key == "CreatePools.run":
     xa = os.environ.get("EXTRA_ASSET", "")
     if xa and int(xa, 16) != 0:  # CreatePools records the extra pair only when there is one
         d["pools"].update(extraAsset=xa, extraQuote=os.environ["EXTRA_QUOTE"], poolIds=["0x%064x" % e, "0x%064x" % (e + 1)])
+elif key == "DeployPositionMarket.run":
+    d["positionMarket"] = "0x00000000000000000000000000000000000000d0"
+elif key == "DeploySeatLP.run":
+    d["seatLPTokens"] = {"%s-%s-0" % (d["pools"]["native"], d["pools"]["usdc"]): "0x00000000000000000000000000000000000000d1"}
 elif key == "CreateVaults.run":
     d["vaults"] = {"usdLow": "0x00000000000000000000000000000000000000e0"}
     p = d.get("pools", {})
@@ -100,7 +106,7 @@ echo "pools created 1"
 EOF
 cat > "$T/bin/pnpm" <<'EOF'
 #!/usr/bin/env bash
-echo "pnpm cwd=$(basename "$PWD") CHAINS=${CHAINS:-} DEPLOYMENT=${DEPLOYMENT:-} $*" >> "$CALLS"
+echo "pnpm cwd=$(basename "$PWD") CHAINS=${CHAINS:-} DEPLOYMENT=${DEPLOYMENT:-} CRE_CONFIG=${CRE_CONFIG:-} RPC=${RPC_URL:-} $*" >> "$CALLS"
 echo '"ok"'
 EOF
 cat > "$T/bin/node" <<'EOF'
@@ -199,27 +205,31 @@ for c in "FAKE_CAST_FAIL=code" "FAKE_CAST_FAIL=call" "FAKE_POOL_SHORT=1"; do
   rm -rf "$DEP/.staging"
 done
 
-# run Deploy again over a deployment of the same core: .pools and .vaults (recorded by later steps) are kept; over a
+# run Deploy again over a deployment of the same core: .pools, .vaults, .positionMarket and .seatLPTokens (recorded by
+# later steps) are kept; over a
 # file naming another core they are dropped
 python3 - "$DEP/hyperevm-testnet.json" <<'PY'
 import json, sys
 json.dump({"chainId": 998, "confluere": "0x00000000000000000000000000000000000000c0", "deployBlock": 7,
            "pools": {"native": "0x00000000000000000000000000000000000000e1", "usdc": "0x2B3370eE501B4a559b57D449569354196457D8Ab",
                      "lst": "0x0000000000000000000000000000000000000000", "expiry": 5, "poolIds": ["0x%064x" % 5]},
-           "vaults": {"usdLow": "0x00000000000000000000000000000000000000e0"}}, open(sys.argv[1], "w"))
+           "vaults": {"usdLow": "0x00000000000000000000000000000000000000e0"},
+           "positionMarket": "0x00000000000000000000000000000000000000d0",
+           "seatLPTokens": {"a-b-0": "0x00000000000000000000000000000000000000d1"}}, open(sys.argv[1], "w"))
 PY
 lib 'run deploy script/Deploy.s.sol 1' > "$T/out" 2>&1 || fail "Deploy re-run failed"
-python3 - "$DEP/hyperevm-testnet.json" <<'PY' || fail "Deploy re-run dropped .pools / .vaults of the same core"
+python3 - "$DEP/hyperevm-testnet.json" <<'PY' || fail "Deploy re-run dropped .pools / .vaults / .positionMarket / .seatLPTokens of the same core"
 import json, sys
 d = json.load(open(sys.argv[1]))
 assert d["pools"]["poolIds"] == ["0x%064x" % 5] and d["vaults"]["usdLow"].endswith("e0") and d["deployBlock"] == 7, d
+assert d["positionMarket"].endswith("d0") and d["seatLPTokens"]["a-b-0"].endswith("d1"), d
 PY
 python3 - "$DEP/hyperevm-testnet.json" "$OLD" <<'PY'
 import json, sys
 d = json.load(open(sys.argv[1])); d["confluere"] = sys.argv[2]; json.dump(d, open(sys.argv[1], "w"))
 PY
 lib 'run deploy script/Deploy.s.sol 1' > "$T/out" 2>&1 || fail "Deploy over another core failed"
-grep -qE '"pools"|"vaults"' "$DEP/hyperevm-testnet.json" && fail "pools of another core carried over"
+grep -qE '"pools"|"vaults"|"positionMarket"|"seatLPTokens"' "$DEP/hyperevm-testnet.json" && fail "records of another core carried over"
 rm -rf "$DEP/.staging"
 
 # run: Seed.run and Seed.collect (--sig) keep separate markers: a finished collect does not clear the marker an
@@ -280,14 +290,16 @@ FAKE_BAL=9000000 FUND=1 lib 'preflight' > "$T/out" 2>&1 || true
 grep -q 'cast send 0x5555555555555555555555555555555555555555 deposit()' "$CALLS" || fail "FUND=1 did not wrap"
 
 # ---------------------------------------------------------------- deploy-testnet.sh
-# whole run: deploy (big blocks), fund, pools, seed, vaults (big blocks), then the SDK
+# whole run: deploy (big blocks), fund, pools, seed, vaults, market and seatlp (big blocks), then the SDK
 rm -f "$DEP"/*.json
 : > "$CALLS"
 "$SCR/deploy-testnet.sh" hyperevm > "$T/out" 2>&1 || fail "deploy-testnet.sh hyperevm failed"
-expect_seq "bb-on Deploy.run bb-off fund CreatePools.run Seed.run bb-on CreateVaults.run bb-off sdk" \
+expect_seq "bb-on Deploy.run bb-off fund CreatePools.run Seed.run bb-on CreateVaults.run bb-off bb-on DeployPositionMarket.run bb-off bb-on DeploySeatLP.run bb-off sdk" \
   "deploy-testnet.sh hyperevm"
 grep -q 'BPS=10 ' <<<"$(forge_line Seed.run)" || fail "seed not at the chain's SEED_UNIT_BPS=10"
 grep -q '"usdLow"' "$DEP/hyperevm-testnet.json" || fail "vaults not recorded"
+grep -q '"positionMarket"' "$DEP/hyperevm-testnet.json" || fail "PositionMarket not recorded"
+grep -q '"seatLPTokens"' "$DEP/hyperevm-testnet.json" || fail "SeatLP tokens not recorded"
 grep -q "EXTRA=0x2B3370eE501B4a559b57D449569354196457D8Ab XQ=0x5555555555555555555555555555555555555555 " \
   <<<"$(forge_line CreatePools.run)" || fail "HyperEVM pools without the USDC/WHYPE extra pair"
 grep -q 'XBPS=2000' <<<"$(forge_line Seed.run)" || fail "extra pair not seeded at EXTRA_SEED_UNIT_BPS=2000"
@@ -296,7 +308,7 @@ grep -q '"nativeLend"' "$DEP/hyperevm-testnet.json" || fail "extra-pair vault no
 # Monad also regenerates the CRE workflow config (it targets monad-testnet)
 : > "$CALLS"
 FAKE_BLOCK=40 "$SCR/deploy-testnet.sh" monad > "$T/out" 2>&1 || fail "deploy-testnet.sh monad failed"
-expect_seq "Deploy.run fund CreatePools.run Seed.run CreateVaults.run sdk cre:monad-testnet" \
+expect_seq "Deploy.run fund CreatePools.run Seed.run CreateVaults.run DeployPositionMarket.run DeploySeatLP.run sdk cre:monad-testnet" \
   "deploy-testnet.sh monad"
 grep -qi "EXTRA=0x282BdDFF5e58793AcAb65438b257Dbd15A8745C9 " <<<"$(forge_line CreatePools.run)" \
   || fail "Monad pools miss the shMON/USDC extra pair"
@@ -308,7 +320,7 @@ if FAKE_FAIL=Seed.run "$SCR/deploy-testnet.sh" monad seed > "$T/out" 2>&1; then 
 grep -q "RESUME=1 $SCR/deploy-testnet.sh monad seed" "$T/out" || fail "deploy hint does not name the seed step"
 : > "$CALLS"
 RESUME=1 "$SCR/deploy-testnet.sh" monad seed > "$T/out" 2>&1 || fail "RESUME=1 seed failed"
-expect_seq "Seed.run! CreateVaults.run sdk cre:monad-testnet" "RESUME=1 deploy-testnet.sh monad seed"
+expect_seq "Seed.run! CreateVaults.run DeployPositionMarket.run DeploySeatLP.run sdk cre:monad-testnet" "RESUME=1 deploy-testnet.sh monad seed"
 
 # a Deploy that landed the core and then failed: the re-run (without RESUME) keeps that attempt's deploy block
 echo "{\"chainId\":10143,\"confluere\":\"$OLD\",\"deployBlock\":1}" > "$DEP/monad-testnet.json"
@@ -478,5 +490,103 @@ PY
 : > "$CALLS"
 FAKE_NOW=$((E0 - 1700)) "$SCR/roll-testnet.sh" hyperevm > "$T/out" 2>&1 || fail "second hyperevm roll failed"
 grep -q "EXTRA=$XO " <<<"$(forge_line CreatePools.run)" || fail "roll ignored the recorded extra pair"
+
+# ---------------------------------------------------------------- Sepolia
+SW=0xB82381A3fBD3FaFA77B3a7bE693342618240067b SE=0xfFf9976782d46CC05630D1f6eBAb18b2324d6B14
+SU=0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238
+rm -rf "$DEP/.staging" "$T/state"/*
+# preflight, book layout, one expiry, 3 trade rounds (10 sells and 10 buys of one unit per strike): wstETH/WETH at
+# 0.0012 wstETH, K 0.93 WETH: 10 x (1.116e15 + 1000) WETH and 10 x 1.2e15 wstETH; WETH/USDC at 0.0001 WETH, K 2100:
+# 10 x (210000 + 1000) USDC and 10 x 1e14 WETH; wstETH/USDC at 0.0001 wstETH, K 2200: 10 x (220000 + 1000) USDC and
+# 10 x 1e14 wstETH. wstETH, WETH and USDC are each counted once.
+: > "$CALLS"
+TRADE_ROUNDS=3 LIBCHAIN=sepolia lib 'preflight' > "$T/out" 2>&1 || fail "sepolia preflight failed when funded"
+grep -qE "lst +need 13000000000000000 " "$T/out" || fail "Sepolia wstETH need: $(grep lst "$T/out")"
+grep -qE "native +need 12160000000010000 " "$T/out" || fail "Sepolia WETH need: $(grep native "$T/out")"
+grep -qE "usdc +need 4320000 " "$T/out" || fail "Sepolia USDC need: $(grep usdc "$T/out")"
+grep -qE "^  extra" "$T/out" && fail "Sepolia: the extra pair's tokens (wstETH, USDC) were counted as separate tokens"
+grep -q "balanceOf(address)(uint256)" <<<"$(grep "$SW" "$CALLS")" || fail "Sepolia preflight did not read wstETH"
+# no USDC: a clear stop naming the Circle faucet; FUND=1 stakes the missing wstETH (ETH sent to wstETH, at its rate
+# plus 1 gwei) and wraps the missing WETH, and keeps GAS_RESERVE (Sepolia default 0.05 ETH) for gas
+: > "$CALLS"
+if TRADE_ROUNDS=3 LIBCHAIN=sepolia FAKE_BAL=0 FAKE_GAS=2000000000000000000 FUND=1 lib 'preflight' > "$T/out" 2>&1; then
+  fail "sepolia preflight passed without USDC"
+fi
+grep -q "faucet.circle.com" "$T/out" || fail "Sepolia: no USDC faucet hint"
+grep -q "cast send $SW --value 1037717826760305089 " "$CALLS" || fail "FUND=1 did not stake wstETH: $(grep 'cast send' "$CALLS")"
+grep -q "cast send $SE deposit() --value 12160000000010000 " "$CALLS" || fail "FUND=1 did not wrap WETH"
+# enough native coin to stake but not to wrap as well: the wrap would eat into the gas reserve, so it stops there
+: > "$CALLS"
+if TRADE_ROUNDS=3 LIBCHAIN=sepolia FAKE_BAL=0 FAKE_GAS=1095000000000000000 FUND=1 lib 'preflight' > "$T/out" 2>&1; then
+  fail "sepolia preflight passed short"
+fi
+grep -q "cast send $SW" "$CALLS" || fail "FUND=1 did not stake wstETH with enough ETH"
+grep -q "cast send $SE" "$CALLS" && fail "FUND=1 wrapped WETH into the gas reserve after staking"
+grep -q "short of wrapped native" "$T/out" || fail "no WETH hint once the reserve is reached"
+: > "$CALLS"
+if TRADE_ROUNDS=3 LIBCHAIN=sepolia FAKE_BAL=0 FAKE_GAS=1000000000000000000 FUND=1 lib 'preflight' > "$T/out" 2>&1; then
+  fail "sepolia preflight passed short"
+fi
+grep -q "cast send $SW" "$CALLS" && fail "FUND=1 staked into the gas reserve"
+grep -q "short of LST $SW by .*receive() stakes and wraps" "$T/out" || fail "no wstETH hint: $(grep LST "$T/out")"
+
+# deploy-testnet.sh sepolia: no big blocks, the seven-row salt (not the live testnets' 0xc0f2), its GRAD row, the
+# wstETH/USDC extra pair, its own seed units, its own CRE config
+: > "$CALLS"
+"$SCR/deploy-testnet.sh" sepolia > "$T/out" 2>&1 || fail "deploy-testnet.sh sepolia failed"
+expect_seq "Deploy.run fund CreatePools.run Seed.run CreateVaults.run DeployPositionMarket.run DeploySeatLP.run sdk cre:sepolia" \
+  "deploy-testnet.sh sepolia"
+# PositionMarket and the SeatLP tokens go on the core's own salt (the scripts' default 0xc0f1 is no testnet core's)
+for k in DeployPositionMarket.run DeploySeatLP.run; do
+  grep -q "SALT=0x0*c0f3 " <<<"$(forge_line $k)" || fail "Sepolia $k: $(forge_line $k)"
+done
+grep -q '"positionMarket"' "$DEP/sepolia.json" && grep -q '"seatLPTokens"' "$DEP/sepolia.json" \
+  || fail "Sepolia PositionMarket / SeatLP tokens not recorded"
+grep -q "SALT=0x0*c0f3 GRAD=sepolia" <<<"$(forge_line Deploy.run)" || fail "Sepolia deploy: $(forge_line Deploy.run)"
+grep -q "NATIVE=$SE .*EXTRA=$SW XQ=$SU " <<<"$(forge_line CreatePools.run)" || fail "Sepolia pools: $(forge_line CreatePools.run)"
+grep -q 'BPS=1 .*XBPS=1 LBPS=12 ' <<<"$(forge_line Seed.run)" || fail "Sepolia seed units: $(forge_line Seed.run)"
+# forge's local simulation does not know Sepolia's state-creation gas: every Sepolia step takes the node's estimates
+grep '^forge ' "$CALLS" | grep -q 'sim=1' && fail "a Sepolia step kept forge's local gas simulation"
+[ "$(python3 -c "import json;print(json.load(open('$DEP/sepolia.json'))['chainId'])")" = 11155111 ] \
+  || fail "deployments/sepolia.json not written"
+grep -q '"nativeLend"' "$DEP/sepolia.json" && fail "Sepolia records a native-coin lending vault (its extra pair lends USDC)"
+# the live testnets keep their salt, and every chain's Deploy carries the Sepolia GRAD row (one table everywhere)
+: > "$CALLS"
+FAKE_BLOCK=40 UNTIL=deploy "$SCR/deploy-testnet.sh" monad > "$T/out" 2>&1 || fail "monad deploy step failed"
+grep -q "SALT=0x0*c0f2 GRAD=sepolia" <<<"$(forge_line Deploy.run)" || fail "Monad deploy: $(forge_line Deploy.run)"
+# a bad chain name prints the usage naming all three
+if "$SCR/deploy-testnet.sh" goerli > "$T/out" 2>&1; then fail "unknown chain accepted"; fi
+grep -q "monad|hyperevm|sepolia" "$T/out" || fail "deploy usage does not name sepolia"
+if "$SCR/roll-testnet.sh" goerli > "$T/out" 2>&1; then fail "unknown chain accepted by the roll"; fi
+grep -q "monad|hyperevm|sepolia" "$T/out" || fail "roll usage does not name sepolia"
+
+# the Sepolia CRE config is its own file, scanned through sync-config's archive RPC unless SEPOLIA_LOGS_RPC is set
+: > "$CALLS"
+"$SCR/deploy-testnet.sh" sepolia vaults > "$T/out" 2>&1 || fail "sepolia vaults step failed"
+grep -q "DEPLOYMENT=sepolia CRE_CONFIG=config.sepolia.json RPC= .*sync-config" "$CALLS" \
+  || fail "Sepolia CRE sync not on config.sepolia.json with sync-config's own RPC"
+: > "$CALLS"
+SEPOLIA_LOGS_RPC=http://archive.example "$SCR/deploy-testnet.sh" sepolia vaults > "$T/out" 2>&1 || fail "sepolia vaults step failed"
+expect_seq "CreateVaults.run DeployPositionMarket.run DeploySeatLP.run sdk cre:sepolia" "Sepolia CRE sync"
+grep -q "RPC=http://archive.example .*sync-config" "$CALLS" || fail "SEPOLIA_LOGS_RPC not passed to sync-config"
+# a run that stopped after vaults finishes with the market step alone
+: > "$CALLS"
+"$SCR/deploy-testnet.sh" sepolia market > "$T/out" 2>&1 || fail "sepolia market step failed"
+expect_seq "DeployPositionMarket.run DeploySeatLP.run sdk cre:sepolia" "deploy-testnet.sh sepolia market"
+
+# roll-testnet.sh sepolia: tokens from .pools, the next consecutive expiry, its own state files
+python3 - "$DEP/sepolia.json" "$E0" "$SW" "$SE" "$SU" <<'PY'
+import json, sys
+f, e, sw, se, su = sys.argv[1], int(sys.argv[2]), *sys.argv[3:6]
+d = {"chainId": 11155111, "confluere": "0x00000000000000000000000000000000000000c0", "gridPeriod": 3600, "deployBlock": 1,
+     "pools": {"lst": sw, "native": se, "usdc": su, "expiry": e, "extraAsset": sw, "extraQuote": su,
+               "poolIds": ["0x%064x" % e]}}
+json.dump(d, open(f, "w"))
+PY
+: > "$CALLS"
+FAKE_NOW=$((E0 - 1800)) "$SCR/roll-testnet.sh" sepolia > "$T/out" 2>&1 || fail "sepolia roll failed"
+expect_seq "Seed.collect fund CreatePools.run Seed.run sdk cre:sepolia" "roll-testnet.sh sepolia"
+grep -q "EXPIRY=$((E0 + P)) NATIVE=$SE .*EXTRA=$SW XQ=$SU " <<<"$(forge_line CreatePools.run)" || fail "sepolia roll pools"
+[ -f "$T/state/confluere/roll-sepolia-0x00000000000000000000000000000000000000c0.txt" ] || fail "sepolia roll state"
 
 echo "testnet-lib tests OK"
