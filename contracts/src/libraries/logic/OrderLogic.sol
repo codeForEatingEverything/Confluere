@@ -26,6 +26,7 @@ library OrderLogic {
         CoreState storage s,
         GridConfig memory g,
         PoolKey calldata key,
+        int16 strikeIndex,
         IConfluere.PoolOptions calldata opts
     ) external returns (bytes32 poolId) {
         if (key.asset == key.quote || key.asset.code.length == 0 || key.quote.code.length == 0) {
@@ -34,7 +35,6 @@ library OrderLogic {
         uint16 band = key.bandBps;
         if (band != 150 && band != 800 && band != 1500) revert IConfluere.InvalidParams();
         if (!Grid.isListableExpiry(g, key.expiry, block.timestamp)) revert IConfluere.InvalidParams();
-        if (key.strike > type(uint96).max || !Grid.isGridStrike(g, key.strike)) revert IConfluere.InvalidParams();
         if (key.cadence > 2 || (opts.firstHi != 0 && opts.firstLo > opts.firstHi)) revert IConfluere.InvalidParams();
 
         poolId = PoolKeyLib.toId(key);
@@ -42,7 +42,9 @@ library OrderLogic {
         if (ps.status != Status.None) revert IConfluere.InvalidPool();
 
         uint8 dec = IERC20Metadata(key.asset).decimals();
-        if (dec > 30) revert IConfluere.BadToken();
+        uint8 qd = IERC20Metadata(key.quote).decimals();
+        if (dec > 30 || qd > 30) revert IConfluere.BadToken();
+        if (!Grid.isGridStrike(key.strike, strikeIndex, qd)) revert IConfluere.InvalidParams();
         _probe(key.asset);
         _probe(key.quote);
 
@@ -50,6 +52,7 @@ library OrderLogic {
         ps.marketId = PoolKeyLib.marketId(key.asset, key.quote, key.kind);
         ps.status = Status.Open;
         ps.assetDecimals = dec;
+        ps.strikeIndex = strikeIndex;
         ps.autoSell = opts.autoSell;
         ps.minFill = opts.minFill;
         ps.firstLo = opts.firstLo;
@@ -57,7 +60,7 @@ library OrderLogic {
         uint256 iv = ps.interval(g.batchInterval);
         if (iv > g.period) revert IConfluere.InvalidParams();
         ps.lastSettledBatch = uint64((block.timestamp - g.anchor) / iv);
-        emit IConfluere.PoolCreated(poolId, key, ps.marketId);
+        emit IConfluere.PoolCreated(poolId, key, strikeIndex, ps.marketId);
         if (opts.minFill != 0 || opts.firstLo != 0 || opts.firstHi != 0 || opts.autoSell) {
             emit IConfluere.PoolOptionsSet(poolId, opts.minFill, opts.firstLo, opts.firstHi, opts.autoSell);
         }
