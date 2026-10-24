@@ -22,6 +22,7 @@ export function phase(p: PoolRow, now: number): Phase {
   if (p.status === Status.Open) return now < p.expiry ? "trading" : "awaiting";
   if (p.status === Status.Window) return "window";
   // v0.8 decision B: an auto-sell pool past its window is selling its defaulted asset in the next maturity
+  if (p.status === Status.Selling) return "selling";
   if (p.status === Status.Closing) return p.autoSell ? "selling" : "closing";
   if (p.status === Status.Closed) return "closed";
   return "none";

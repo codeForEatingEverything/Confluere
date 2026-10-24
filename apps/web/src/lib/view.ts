@@ -42,7 +42,7 @@ export function poolState(p: PoolRow, now: number, block: bigint): PoolState {
     return windowOpen(p, now, block) ? "window" : "awaiting";
   }
   if (p.status === Status.Window) return windowOpen(p, now, block) ? "window" : "closing";
-  if (p.status === Status.Closing) return "closing";
+  if (p.status === Status.Closing || p.status === Status.Selling) return "closing"; // Selling: claims wait for the sale
   if (p.status === Status.Closed) return "closed";
   return "none";
 }
