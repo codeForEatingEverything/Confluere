@@ -28,7 +28,9 @@ export function dueAction(p: PoolSnapshot, nowS: number, block: bigint, settleDe
     return "none";
   }
   if (p.status === Status.Window && block >= p.windowEnd) return "close";
-  if (p.status === Status.Closing) return "close";
+  // Closing: segmented abandonment auction; Selling: closeWindow finalises once the autoSell order is dead (a failing
+  // simulation only means the order still trades)
+  if (p.status === Status.Closing || p.status === Status.Selling) return "close";
   return "none";
 }
 

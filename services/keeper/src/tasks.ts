@@ -19,6 +19,8 @@ export type Log = (msg: string, extra?: Record<string, unknown>) => void;
 
 const ZERO32 = "0x0000000000000000000000000000000000000000000000000000000000000000";
 const PURGE_CHUNK = 50;
+/** OrderSet.FLAG_ROLLOVER: the order's units come from an old pool (linkedPool) and die with its window. */
+const FLAG_ROLLOVER = 1;
 
 export class Tasks {
   private lastPoke = new Map<Address, number>();
@@ -80,10 +82,11 @@ export class Tasks {
       const [head] = await this.c.pub.readContract({ address: core, abi: confluereAbi, functionName: "bookHead", args: [pid, side] });
       for (let id = head, n = 0; id !== 0n && n < 1024; n++) {
         const o = await this.c.pub.readContract({ address: core, abi: confluereAbi, functionName: "order", args: [pid, id] });
-        const bo: BookOrder = { id, side, deadline: Number(o[5]) };
-        // only rollover sells can die through their old pool; skip the lookup when the order is dead anyway
-        if (side === Side.Sell && !tradingOver && bo.deadline > settleCount) {
-          const src = await this.c.pub.readContract({ address: core, abi: confluereAbi, functionName: "rolloverSource", args: [pid, id] });
+        const bo: BookOrder = { id, side, deadline: Number(o[6]) };
+        // only rollover sells (FLAG_ROLLOVER) can die through their old pool; autoSell sells (also linked) die by ttl or
+        // the target pool's expiry like any order. Skip the lookup when the order is dead anyway.
+        if (side === Side.Sell && (Number(o[2]) & FLAG_ROLLOVER) !== 0 && !tradingOver && bo.deadline > settleCount) {
+          const src = await this.c.pub.readContract({ address: core, abi: confluereAbi, functionName: "linkedPool", args: [pid, id] });
           if (BigInt(src) !== 0n) {
             const old = oldPools.get(src) ?? (await this.oldPool(src));
             oldPools.set(src, old);
@@ -96,7 +99,7 @@ export class Tasks {
           }
         }
         orders.push(bo);
-        id = o[6];
+        id = o[7];
       }
     }
     const dead = deadOrders(orders, settleCount, tradingOver);
