@@ -7,6 +7,8 @@ import {Kind, Status} from "../../src/libraries/PoolKey.sol";
 import {BID} from "../../src/libraries/OrderSet.sol";
 
 contract WindowTest is Base {
+    uint256 internal constant SP = 5_548_315; // spread share per unit at P* = 2900: 5% of (K - 2900e6), rounded down
+
     function _funded(Kind kind) internal returns (bytes32 pid) {
         pid = _create(K, kind, E1);
         // alice and dave borrow 1 ETH each at 2900; bob and carol lend
@@ -17,7 +19,7 @@ contract WindowTest is Base {
         _settle(pid);
         assertEq(core.pool(pid).filledUnits, 2 * ONE);
         // 5% of (K - P*) per unit sits in the escrow until close
-        assertEq(core.pool(pid).feeEscrow, 10e6);
+        assertEq(core.pool(pid).feeEscrow, 2 * SP);
     }
 
     function test_american_repayAnytime_withSpreadShare() public {
@@ -27,10 +29,10 @@ contract WindowTest is Base {
         vm.prank(alice);
         core.repay(pid, uint96(ONE));
         assertEq(weth.balanceOf(alice), w0 + ONE, "asset back");
-        assertEq(u0 - usdc.balanceOf(alice), 3000e6, "paid K");
+        assertEq(u0 - usdc.balanceOf(alice), K, "paid K");
         // repay carries no fee: all of K goes to C holders; treasury holds only the four trade fees (0.015% each)
         assertEq(_pend(address(usdc), treasury), 4 * 435_000);
-        assertEq(core.pool(pid).quoteBal, 3000e6);
+        assertEq(core.pool(pid).quoteBal, K);
         assertEq(core.pool(pid).repaidUnits, ONE);
         assertEq(core.balanceOf(alice, _r(pid)), 0);
     }
@@ -86,11 +88,11 @@ contract WindowTest is Base {
         vm.prank(bob);
         (uint256 q, uint256 a) = core.claim(pid);
         assertEq(a, 0);
-        assertEq(q, 3000e6, "all of K; the spread share was taken from the borrowers at clearing");
+        assertEq(q, K, "all of K; the spread share was taken from the borrowers at clearing");
         assertEq(usdc.balanceOf(bob), u0 + q);
         vm.prank(carol);
         (q,) = core.claim(pid);
-        assertEq(q, 3000e6);
+        assertEq(q, K);
         assertEq(core.pool(pid).quoteBal, 0);
     }
 
@@ -100,7 +102,7 @@ contract WindowTest is Base {
         core.closeWindow(pid, 10);
         vm.prank(bob);
         (uint256 q, uint256 a) = core.claim(pid);
-        assertEq(q, 5e6, "defaulted part of the spread escrow goes to C holders");
+        assertEq(q, SP, "defaulted part of the spread escrow goes to C holders");
         assertEq(a, ONE, "physical delivery");
         assertEq(_pend(address(usdc), treasury), 4 * 435_000, "only trade fees on default");
     }
@@ -121,8 +123,8 @@ contract WindowTest is Base {
 
         // only dave's 1 unit was unrepaid: eve (highest) takes it all
         assertEq(_pend(address(weth), eve), ONE);
-        assertEq(_pend(address(usdc), eve), 5e17 * 3100e6 / ONE, "unused half refunded");
-        assertEq(_pend(address(usdc), carol) - carol0, 3040e6, "losing bid refunded");
+        assertEq(_pend(address(usdc), eve), 5e17 * (uint256(K) + 100e6) / ONE, "unused half refunded");
+        assertEq(_pend(address(usdc), carol) - carol0, uint256(K) + 40e6, "losing bid refunded");
         (address o,,,,,,) = core.order(pid, b1);
         assertEq(o, address(0));
 
@@ -137,7 +139,7 @@ contract WindowTest is Base {
         // lenders split: alice repaid 2990 net + eve paid 3000
         vm.prank(bob);
         (q,) = core.claim(pid);
-        assertEq(q, 3000e6);
+        assertEq(q, K);
     }
 
     function test_bid_cancellableOnlyInWindow() public {
@@ -189,7 +191,7 @@ contract WindowTest is Base {
         vm.expectRevert(IConfluere.BookFull.selector);
         core.bid(pid, uint96(ONE), 5e6, uint64(hint));
         _bid(carol, pid, ONE, 50e6);
-        assertEq(_pend(address(usdc), eve), 3010e6, "lowest bid evicted and refunded");
+        assertEq(_pend(address(usdc), eve), uint256(K) + 10e6, "lowest bid evicted and refunded");
     }
 
     function test_claim_burnsAndPaysProRata_mixed() public {
@@ -202,7 +204,7 @@ contract WindowTest is Base {
         core.closeWindow(pid, 10);
         vm.prank(bob);
         (uint256 q, uint256 a) = core.claim(pid);
-        assertEq(q, 1502.5e6); // K/2 + half of the defaulted half of the escrow
+        assertEq(q, (uint256(K) + SP) / 2); // K/2 + half of the defaulted half of the escrow
         assertEq(a, 5e17);
         assertEq(core.balanceOf(bob, _c(pid)), 0);
         // transferred C claims the same
@@ -210,7 +212,7 @@ contract WindowTest is Base {
         core.transfer(eve, _c(pid), ONE);
         vm.prank(eve);
         (q, a) = core.claim(pid);
-        assertEq(q, 1502.5e6); // K/2 + half of the defaulted half of the escrow
+        assertEq(q, (uint256(K) + SP + 1) / 2); // the last claimer takes the rounding dust
         assertEq(a, 5e17);
     }
 

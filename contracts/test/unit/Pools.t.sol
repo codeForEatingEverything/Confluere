@@ -38,10 +38,9 @@ contract PoolsTest is Base {
     }
 
     function test_createPool_strikeGrid() public {
-        _create(3100e6, Kind.American, E1); // two significant digits
+        _create(K_HI, Kind.American, E1); // n = 808
         vm.expectRevert(IConfluere.InvalidParams.selector);
-        _create(3150e6, Kind.American, E1); // three
-        _create(98e16, Kind.European, E1); // pegged 0.98 in an 18-decimal quote
+        _create(3000e6, Kind.American, E1); // between 804 and 805: off the grid
     }
 
     function test_createPool_rejectsBadBandOrCadence() public {

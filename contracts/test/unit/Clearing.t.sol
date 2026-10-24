@@ -32,10 +32,10 @@ contract ClearingTest is Base {
         assertEq(core.balanceOf(alice, _r(pid)), ONE, "R to borrower");
         assertEq(core.balanceOf(bob, _c(pid)), ONE, "C to lender");
         // seller: P* less 0.015% trade fee (435,000) and 5% of K - P* (5e6) into the pool's spread escrow
-        assertEq(_pend(address(usdc), alice), 2900e6 - 435_000 - 5e6, "borrower receives P* net of fees");
+        assertEq(_pend(address(usdc), alice), 2900e6 - 435_000 - 5_548_315, "borrower receives P* net of fees");
         // escrow 2950 + 0.015% + 2 wei x ttl 10; paid 2900 + 0.015%
         assertEq(_pend(address(usdc), bob), 50e6 + 7500 + 20, "lender refunded limit - P*, fee difference, reserve");
-        assertEq(v.feeEscrow, 5e6);
+        assertEq(v.feeEscrow, 5_548_315);
         assertEq(_pend(address(usdc), treasury), 2 * 435_000, "trade fee from each side");
         assertEq(v.assetBal, ONE);
         assertEq(v.filledUnits, ONE);
@@ -64,8 +64,8 @@ contract ClearingTest is Base {
         (address yo,,,,,,) = core.order(pid, y);
         assertEq(yo, carol, "unfilled stays");
         // every filled seller got at least its limit, every filled buyer paid at most its limit
-        assertEq(_pend(address(usdc), alice), 2950e6 - 442_500 - 2.5e6, "P* net of trade fee and spread share");
-        assertEq(_pend(address(usdc), dave), 1475e6 - 221_250 - 1.25e6);
+        assertEq(_pend(address(usdc), alice), 2950e6 - 442_500 - 3_048_315, "P* net of trade fee and spread share");
+        assertEq(_pend(address(usdc), dave), 1475e6 - 221_250 - 1_524_157);
     }
 
     function test_noCross_noFill() public {

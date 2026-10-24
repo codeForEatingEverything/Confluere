@@ -235,7 +235,7 @@ contract PositionMarketTest is Base {
     }
 
     function test_R_otherPoolOfExpiryStartsWindow() public {
-        bytes32 other = _create(2800e6, Kind.American, E1);
+        bytes32 other = _create(K_LO, Kind.American, E1);
         vm.warp(E1);
         core.mature(other); // starts the shared window of E1
         vm.roll(block.number + WINDOW);

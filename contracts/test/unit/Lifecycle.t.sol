@@ -57,19 +57,20 @@ contract LifecycleTest is Base {
         vm.warp(E1);
         core.mature(p1);
         _settle(p2);
-        // P* = (2850 + 2950)/2 = 2900; old pool gets K = 3000 with 100 from top-up
+        // P* = (2850 + 2950)/2 = 2900; old pool gets all of K, the gap from the top-up
         assertEq(core.balanceOf(alice, _r(p2)), ONE);
         assertEq(core.balanceOf(alice, _r(p1)), 0);
         assertEq(core.lockedR(alice, p1), 0);
         IConfluere.PoolView memory v1 = core.pool(p1);
         assertEq(v1.assetBal, 0);
-        assertEq(v1.quoteBal, 3000e6, "all of K; the old pool counts the units as repaid");
+        assertEq(v1.quoteBal, K, "all of K; the old pool counts the units as repaid");
         assertEq(v1.repaidUnits, ONE);
         assertEq(core.pool(p2).assetBal, ONE);
-        assertEq(core.pool(p2).feeEscrow, 5e6, "new pool's spread share at its own P*");
+        assertEq(core.pool(p2).feeEscrow, 5_548_315, "new pool's spread share at its own P*");
         assertEq(_pend(address(usdc), treasury), 4 * 435_000, "trade fees, both pools, both sides");
-        // net per fill at 2900 = 2900 - 0.435 trade fee - 5 spread share; top-up = 3000 - 2894.565
-        assertEq(_pend(address(usdc), alice), 2894.565e6 + (200e6 - 105.435e6), "first borrow + unused top-up");
+        // net per fill at 2900 = 2900 - 0.435 trade fee - spread share; top-up = K - net
+        uint256 net = 2900e6 - 435_000 - 5_548_315;
+        assertEq(_pend(address(usdc), alice), net + (200e6 - (K - net)), "first borrow + unused top-up");
     }
 
     function test_rollover_needsEnoughTopUp() public {

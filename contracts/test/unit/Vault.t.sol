@@ -153,7 +153,7 @@ contract VaultTest is VaultBase {
         (uint256 nav, uint256 supply,) = vault.epochs(2);
         assertEq(supply, 10_000e6 * 1e6);
         // interest: c units bought at 2900 (plus the 0.015% buyer trade fee) return all of K = 3000
-        uint256 expected = 10_000e6 + c * 100e6 / ONE - (c * 2900e6 / ONE) * 150 / 1e6;
+        uint256 expected = 10_000e6 + c * (uint256(K) - 2900e6) / ONE - (c * 2900e6 / ONE) * 150 / 1e6;
         assertApproxEqAbs(nav, expected, 10);
 
         // lp2 enters at the new price, so gets fewer shares than assets

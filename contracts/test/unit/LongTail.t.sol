@@ -152,7 +152,7 @@ contract LongTailTest is Base {
         vm.prank(alice);
         core.cancelOrder(main, a); // mainstream: no cutoff
 
-        bytes32 pid = _createKey(core, _keyT(3100e6, Kind.American, E1, 1500, 1), _noOpts()); // different strike: a separate pool from `main`
+        bytes32 pid = _createKey(core, _keyT(K_HI, Kind.American, E1, 1500, 1), _noOpts()); // different strike: a separate pool from `main`
         uint64 id = _order(alice, pid, SELL, ONE, 3500e6, 0, 1);
         vm.warp(core.nextBatchAt(pid));
         core.settleBatch(pid); // its single batch passes untraded: expired
@@ -173,8 +173,7 @@ contract LongTailTest is Base {
     function test_cadenceLongerThanPeriodRejected() public {
         // a demo grid: 1-hour expiries, 2-minute batches -> 48 x 2 min = 96 min > 1 h
         Confluere.Config memory c = _config();
-        c.grid =
-            GridConfig({anchor: ANCHOR, period: 1 hours, batchInterval: 2 minutes, maxExpiries: 4, strikeSigDigits: 2});
+        c.grid = GridConfig({anchor: ANCHOR, period: 1 hours, batchInterval: 2 minutes, maxExpiries: 4});
         Confluere demo = new Confluere(c);
         weth.approve(address(demo), type(uint256).max);
         usdc.approve(address(demo), type(uint256).max);

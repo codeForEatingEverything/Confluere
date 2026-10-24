@@ -160,7 +160,7 @@ contract PeripheryTest is Base {
         uint256 u0 = usdc.balanceOf(bob);
         r.claimMany(pids);
         vm.stopPrank();
-        assertEq(usdc.balanceOf(bob) - u0, 3000e6);
+        assertEq(usdc.balanceOf(bob) - u0, K);
     }
 
     function test_vaultFactory() public {
