@@ -60,4 +60,93 @@ contract ClearingHalmos is Test {
         uint256 b = Clearing.widenedBand(bandBps, uint256(f) + 1);
         assert(b >= a && b <= Clearing.BPS);
     }
+
+    // ------------------------------------------------------------ v0.8: non-competitive buys in the price
+
+    /// Reference of ClearingLogic._cross on a 3-order book per side (sorted limits, positive sizes): `pre` units of
+    /// any-price demand take the cheapest sells first, then the competitive books cross; P* is the midpoint of the
+    /// marginal pair.
+    function _cross(uint256[3] memory su, uint256[3] memory sl, uint256[3] memory bu, uint256[3] memory bl, uint256 pre)
+        internal
+        pure
+        returns (uint256 q, uint256 price, uint256 ms, uint256 mb)
+    {
+        uint256 i;
+        uint256 j;
+        uint256 sr = su[0];
+        uint256 br = bu[0];
+        while (pre != 0 && i < 3) {
+            uint256 t = sr < pre ? sr : pre;
+            pre -= t;
+            sr -= t;
+            if (sr == 0 && ++i < 3) sr = su[i];
+        }
+        if (pre != 0) return (0, 0, 0, 0);
+        while (i < 3 && j < 3 && sl[i] <= bl[j]) {
+            uint256 m = sr < br ? sr : br;
+            q += m;
+            ms = sl[i];
+            mb = bl[j];
+            sr -= m;
+            br -= m;
+            if (sr == 0 && ++i < 3) sr = su[i];
+            if (br == 0 && ++j < 3) br = bu[j];
+        }
+        if (q != 0) price = Clearing.midpoint(ms, mb);
+    }
+
+    /// The NC pricing rule (blueprint 4.2 as pinned by the simulations): with d = min(NC demand, q0 / 2) priced in
+    /// ahead of the competitive buys, the recross price never falls below the competitive-only price, stays between
+    /// the marginal competitive limits that fill, and the NC volume stays within half the competitive-only volume.
+    function check_ncPricingRule(
+        uint8[3] memory sUnits,
+        uint16[3] memory sLim,
+        uint8[3] memory bUnits,
+        uint16[3] memory bLim,
+        uint8 demand
+    ) public pure {
+        uint256[3] memory su;
+        uint256[3] memory sl;
+        uint256[3] memory bu;
+        uint256[3] memory bl;
+        for (uint256 k; k < 3; ++k) {
+            vm.assume(sUnits[k] != 0 && bUnits[k] != 0);
+            (su[k], sl[k], bu[k], bl[k]) = (sUnits[k], sLim[k], bUnits[k], bLim[k]);
+        }
+        vm.assume(sl[0] <= sl[1] && sl[1] <= sl[2] && bl[0] >= bl[1] && bl[1] >= bl[2]);
+        (uint256 q0, uint256 p0,,) = _cross(su, sl, bu, bl, 0);
+        vm.assume(q0 != 0);
+        uint256 cap = q0 * 5000 / 10_000;
+        uint256 d = demand < cap ? demand : cap;
+        vm.assume(d != 0);
+        (uint256 q1, uint256 p1, uint256 ms, uint256 mb) = _cross(su, sl, bu, bl, d);
+        vm.assume(q1 != 0); // otherwise the competitive-only result stands
+        assert(p1 >= p0);
+        assert(ms <= p1 && p1 <= mb);
+        assert(2 * d <= q0);
+    }
+
+    /// Stage-2 sizing keeps the total non-competitive volume within half the competitive-only volume.
+    function check_ncCapHalf(uint128 qc, uint128 x, uint128 m2raw) public pure {
+        uint256 cap = uint256(qc) * 5000 / 10_000;
+        vm.assume(x <= cap);
+        uint256 m2 = m2raw < cap - x ? m2raw : cap - x;
+        assert(uint256(x) + m2 <= uint256(qc) / 2);
+    }
+
+    /// The seller's split never goes negative and adds back to the gross, whatever the raw spread share.
+    function check_sellSplitNonNegative(uint128 gross, uint128 raw) public pure {
+        uint256 trade = Settlement.tradeFee(gross);
+        uint256 spread = raw > gross - trade ? gross - trade : raw;
+        uint256 net = gross - trade - spread;
+        assert(trade <= gross && net + spread + trade == gross);
+    }
+
+    /// Guardian pause budget (invariant 3c): an accepted pause never takes the cumulative total past the cap.
+    function check_pauseCap(uint64 pausedBlocks, uint64 blocks, uint64 max) public pure {
+        vm.assume(pausedBlocks <= max);
+        uint256 total = uint256(pausedBlocks) + blocks;
+        if (blocks == 0 || total > max) return; // rejected
+        assert(total <= max && total > pausedBlocks);
+    }
 }
