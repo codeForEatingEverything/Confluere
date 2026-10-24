@@ -9,7 +9,16 @@ import {
   Kind,
   quoteUp,
   quoteDown,
-  spreadFee,
+  spreadShare,
+  tradeFee,
+  buyEscrow,
+  buyCost,
+  ncUnits,
+  sellerNet,
+  sellSplit,
+  feeEscrowSplit,
+  borrowerNetPerUnit,
+  lenderCostPerUnit,
   isGridStrike,
   rolloverTopUp,
   chainById,
@@ -62,9 +71,41 @@ describe("math", () => {
   it("rounds buyers up and sellers down by at most 1", () => {
     expect(quoteUp(1n, 3n, 2n) - quoteDown(1n, 3n, 2n)).toBe(1n);
   });
-  it("charges the spread share only on interest", () => {
-    expect(spreadFee(scale, 3000_000000n, 2900_000000n, 1000, scale)).toBe(10_000000n);
-    expect(spreadFee(scale, 3000_000000n, 3100_000000n, 1000, scale)).toBe(0n);
+  it("charges the 5% spread share only on interest", () => {
+    expect(spreadShare(scale, 3000_000000n, 2900_000000n, scale)).toBe(5_000000n);
+    expect(spreadShare(scale, 3000_000000n, 3000_000000n, scale)).toBe(0n);
+    expect(spreadShare(scale, 3000_000000n, 3100_000000n, scale)).toBe(0n);
+    expect(spreadShare(3n, 1000n, 999n, 1n)).toBe(0n); // 3 * 1 * 500 / 1e4 rounds down
+  });
+  it("charges 0.015% trade fee per side, rounded down", () => {
+    expect(tradeFee(1_000_000n)).toBe(150n);
+    expect(tradeFee(10_000n)).toBe(1n);
+    expect(tradeFee(6_666n)).toBe(0n);
+    expect(tradeFee(2900_000000n)).toBe(435000n);
+  });
+  it("escrows cost at limit + trade fee + 2 wei per batch", () => {
+    expect(buyEscrow(scale, 2900_000000n, 3, scale)).toBe(2900_435006n);
+    expect(buyEscrow(1n, 2900_000000n, 1, scale)).toBe(1n + 0n + 2n); // cost rounds up to 1 wei
+    expect(buyCost(scale, 2900_000000n, scale)).toEqual({ cost: 2900_000000n, trade: 435000n, total: 2900_435000n });
+  });
+  it("sizes an all-in NC budget", () => {
+    expect(ncUnits(1000_150000n, 2000_000000n, scale)).toBe(499_999_999_500_000_000n);
+    expect(ncUnits(1n, 2000_000000n, scale)).toBe(0n);
+    expect(ncUnits(2n, 2000_000000n, scale)).toBe(0n); // floor(2e6 / 1000150) = 1 -> nothing after the 1 wei reserve
+    expect(ncUnits(1000n, 0n, scale)).toBe(0n);
+  });
+  it("splits a seller fill into gross, trade fee, spread share and net", () => {
+    expect(sellSplit(scale, 2900_000000n, 3000_000000n, scale)).toEqual({ gross: 2900_000000n, trade: 435000n, spread: 5_000000n, net: 2894_565000n });
+    expect(sellerNet(scale, 2900_000000n, 3000_000000n, scale)).toBe(2894_565000n);
+    expect(borrowerNetPerUnit(2900_000000n, 3000_000000n, scale)).toBe(2894_565000n);
+    // capped so a fill never reverts: gross 1 wei, spread would be 149999999
+    expect(sellSplit(scale, 1n, 3000_000000n, scale)).toEqual({ gross: 1n, trade: 0n, spread: 1n, net: 0n });
+    expect(lenderCostPerUnit(2900_000000n)).toBe(2900_435000n);
+  });
+  it("splits the fee escrow by repaid / filled units", () => {
+    expect(feeEscrowSplit(1000n, 3n, 4n)).toEqual({ toTreasury: 750n, toLenders: 250n });
+    expect(feeEscrowSplit(1000n, 1n, 3n)).toEqual({ toTreasury: 333n, toLenders: 667n });
+    expect(feeEscrowSplit(1000n, 0n, 0n)).toEqual({ toTreasury: 0n, toLenders: 1000n });
   });
   it("knows the strike grid", () => {
     expect(isGridStrike(3000_000000n)).toBe(true);
@@ -72,7 +113,8 @@ describe("math", () => {
     expect(isGridStrike(98n * 10n ** 16n)).toBe(true);
   });
   it("matches the rollover top-up rule", () => {
-    expect(rolloverTopUp(scale, 3000_000000n, 2850_000000n, 500, scale)).toBe(150_000000n + 1000n);
+    expect(rolloverTopUp(scale, 3000_000000n, 2850_000000n, 500, scale)).toBe(150_000000n + 427500n + 7_500000n + 2000n);
+    expect(rolloverTopUp(scale, 3000_000000n, 2850_000000n, 1, scale, 3100_000000n)).toBe(150_000000n + 427500n + 12_500000n + 4n);
   });
 });
 
