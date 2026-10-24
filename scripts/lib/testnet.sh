@@ -1,11 +1,15 @@
 # Shared by scripts/deploy-testnet.sh and scripts/roll-testnet.sh (sourced, not run). Expects ROOT and the chain
-# name (monad | hyperevm) as $1 of testnet_env; works from $ROOT/contracts.
+# name (monad | hyperevm | sepolia) as $1 of testnet_env; works from $ROOT/contracts.
 #
 # Real tokens (verified on-chain 2026-10-12):
 #   Monad testnet:    WMON 0xFb8b…C541 (deposit() wraps MON), USDC 0x534b…43A3 (Circle faucet),
 #                     shMON 0x282B…45C9 (FastLane, deposit(assets, receiver) payable; 1 shMON ≈ 12.9 MON)
 #   HyperEVM testnet: WHYPE 0x5555…5555 (deposit()), USDC 0x2B33…D8Ab (Circle faucet). No mintable LST, so no loop pair;
 #                     instead the extra pair USDC/WHYPE (borrowers post USDC for HYPE) is how the native coin is lent.
+# Verified 2026-10-23 (Sepolia reads and an anvil fork):
+#   Ethereum Sepolia: WETH 0xfFf9…6B14 (Uniswap's canonical Sepolia WETH, deposit()), USDC 0x1c7D…7238 (Circle faucet),
+#                     wstETH 0xB823…067b (Lido; sending ETH to it stakes and wraps in one call, 1 wstETH ≈ 1.0377 ETH),
+#                     stETH 0x3e3F…40Af (submit(address) payable).
 
 export PATH="$PATH:$HOME/.foundry/bin"
 M_WMON=0xFb8bf4c1CC7a94c73D209a149eA2AbEa852BC541
@@ -13,11 +17,23 @@ M_USDC=0x534b2f3A21130d7a60830c2Df862319e593943A3
 M_SHMON=0x282BdDFF5e58793AcAb65438b257Dbd15A8745C9
 H_WHYPE=0x5555555555555555555555555555555555555555
 H_USDC=0x2B3370eE501B4a559b57D449569354196457D8Ab
+S_WETH=0xfFf9976782d46CC05630D1f6eBAb18b2324d6B14
+S_USDC=0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238
+S_WSTETH=0xB82381A3fBD3FaFA77B3a7bE693342618240067b
 ZERO=0x0000000000000000000000000000000000000000
 # CREATE2 salt of the testnet deployment (Deploy.s.sol SALT). The SeatRegistry's address does not depend on the grid,
 # so a redeploy with the same GRAD rows but another grid needs a new salt (the registry of the old salt is bound to the
 # old core). 0xc0f1: the 2026-10-12 demo-grid core; 0xc0f2: the 2026-10-13 daily-grid core.
+# Adding the Ethereum and Sepolia rows (2026-10-23) changed the core's init code, so the core address of 0xc0f2 changed
+# too, while the SeatRegistry addresses of Monad testnet and HyperEVM testnet did not: a Deploy re-run there on 0xc0f2
+# would simulate a new core, then stop at "registry bound to another core" before broadcasting (the live 0x7E02…b1f7
+# deployments stay as they are; their later steps and scripts/roll-testnet.sh do not run Deploy). So the seven-row
+# table gets its own salt, TESTNET_SALT_NEXT (0xc0f3): Sepolia deploys on it now (testnet_params sets TESTNET_SALT for
+# it), and Monad and HyperEVM move to it only when the founder approves their redeploy
+# (SALT=$TESTNET_SALT_NEXT scripts/deploy-testnet.sh monad): with the same GRAD rows, deployer and grid all three then
+# share one core address again. docs/IMPLEMENTATION_NOTES.md records this as a pending deviation.
 TESTNET_SALT=0x000000000000000000000000000000000000000000000000000000000000c0f2
+TESTNET_SALT_NEXT=0x000000000000000000000000000000000000000000000000000000000000c0f3
 LOG=$(mktemp "${TMPDIR:-/tmp}/confluere-step.XXXXXX")
 BIG=0 # 1 while HyperEVM big blocks may be on for this account
 # Seeded books (Seed.s.sol book layout, SEED_APR_BPS > 0): priced by time to expiry at SEED_APR_BPS (10% a year), a
