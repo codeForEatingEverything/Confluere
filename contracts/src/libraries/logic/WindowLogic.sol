@@ -28,14 +28,18 @@ library WindowLogic {
         emit IConfluere.Matured(poolId, end);
     }
 
-    /// @notice Guardian pause of an un-graduated pool (the core checks the caller).
+    /// @notice Guardian pause of an un-graduated pool (the core checks the caller). Each pool has a cumulative budget
+    /// of MAX_PAUSE_BLOCKS, counted on the blocks granted; a running pause cannot be extended (invariant 3c).
     function pause(CoreState storage s, Params memory pr, bytes32 poolId, uint64 blocks) external {
         PoolState storage ps = s.pool(poolId);
-        if (s.graduated[ps.marketId] || blocks == 0 || blocks > pr.maxPauseBlocks) revert IConfluere.InvalidParams();
+        uint256 total = uint256(ps.pausedBlocks) + blocks;
+        if (s.graduated[ps.marketId] || blocks == 0 || total > pr.maxPauseBlocks) revert IConfluere.InvalidParams();
+        if (block.number < ps.pausedUntil) revert IConfluere.IsPaused();
         uint64 until = uint64(block.number) + blocks;
         ps.pausedUntil = until;
+        ps.pausedBlocks = uint64(total);
         s.stats[ps.marketId][ps.key.expiry].bad = true;
-        emit IConfluere.Paused(poolId, until);
+        emit IConfluere.Paused(poolId, until, uint64(total));
     }
 
     /// @notice Permissionless. A market graduates after GRADUATION_CYCLES consecutive past expiries that each reached
