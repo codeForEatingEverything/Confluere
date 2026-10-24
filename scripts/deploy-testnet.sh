@@ -1,38 +1,43 @@
 #!/usr/bin/env bash
-# Testnet deployment on real tokens (no mocks). Usage: scripts/deploy-testnet.sh monad|hyperevm [step]
-# Reads PRIVATE_KEY from contracts/.env. Steps run in order: deploy fund pools seed vaults; the optional second argument
-# starts from that step. Every step can be repeated: Deploy reuses CREATE2 contracts that already have code,
-# CreatePools keeps existing pools, Seed skips pools the deployer already seeded this batch, CreateVaults reuses its
-# vaults, and deployments/<chain>.json is replaced only after a step's broadcast landed. RESUME=1 finishes the
-# interrupted broadcast of the first step run, and only that step's own (e.g. RESUME=1 scripts/deploy-testnet.sh
-# hyperevm pools); a failed step prints the exact command. A failed Deploy attempt's staged file is kept for the re-run,
-# so the log-scan start block stays the core's; without it Deploy asks for DEPLOY_BLOCK (the core's creation block).
+# Testnet deployment on real tokens (no mocks). Usage: scripts/deploy-testnet.sh monad|hyperevm|sepolia [step]
+# Reads PRIVATE_KEY from contracts/.env. Steps run in order: deploy fund pools seed trade vaults market seatlp; the
+# optional second argument starts from that step. Every step can be repeated: Deploy reuses CREATE2 contracts that
+# already have code, CreatePools keeps existing pools, Seed skips pools the deployer already seeded this batch,
+# CreateVaults reuses its vaults, and deployments/<chain>.json is replaced only after a step's broadcast landed.
+# RESUME=1 finishes the interrupted broadcast of the first step run, and only that step's own (e.g. RESUME=1
+# scripts/deploy-testnet.sh hyperevm pools); a failed step prints the exact command. A failed Deploy attempt's staged
+# file is kept for the re-run, so the log-scan start block stays the core's; without it Deploy asks for DEPLOY_BLOCK
+# (the core's creation block).
 # fund: checks the balances one seed needs and stops before any pool exists if they fall short (FUND=1 wraps the
-# missing wrapped native). Later expiries: scripts/roll-testnet.sh (four consecutive expiries let a market graduate).
+# missing wrapped native, and on Sepolia stakes the missing wstETH). Later expiries: scripts/roll-testnet.sh (four
+# consecutive expiries let a market graduate). Salt: TESTNET_SALT of scripts/lib/testnet.sh (Sepolia: the seven-row
+# table's TESTNET_SALT_NEXT); SALT overrides it.
 # Daily grid (GRID=daily: daily expiries listed 15 days ahead, 2 min batches, production ~2 h windows): the pools step
 # opens 1-, 7- and 14-day maturities at once (MATURITY_DAYS, launch_expiries in scripts/lib/testnet.sh), one strike x
 # both repay styles per pair; seed leaves a two-sided book in every pool and trade runs TRADE_ROUNDS small crossing
-# rounds so every pool has fills and a price. UNTIL=<step> stops after that step.
+# rounds so every pool has fills and a price. market deploys the C/R secondary market (PositionMarket) and seatlp one
+# SeatLPToken per market (DeployPositionMarket.s.sol, DeploySeatLP.s.sol; both reuse what is already deployed).
+# UNTIL=<step> stops after that step.
 # Chain parameters and the real token addresses live in scripts/lib/testnet.sh.
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT/contracts"
 set -a; . ./.env; set +a
 . "$ROOT/scripts/lib/testnet.sh"
-testnet_env "${1:-}" || { echo "usage: $0 monad|hyperevm [deploy|fund|pools|seed|vaults]"; exit 1; }
+testnet_env "${1:-}" || { echo "usage: $0 monad|hyperevm|sepolia [deploy|fund|pools|seed|trade|vaults|market|seatlp]"; exit 1; }
 ME=$(cast wallet address "${SIGNER[@]}")
 
-# Graduation rows of both testnets (USDC 1000 = 0.001 USDC, native 1e17 per expiry): see testnet_grad in
+# Graduation rows of the three testnets (USDC 1000 = 0.001 USDC, native 1e17 per expiry): see testnet_grad in
 # scripts/lib/testnet.sh. They are part of the core's init code: changing them and redeploying gives a NEW core
-# address on both chains (redeploy both; this script regenerates the SDK and CRE configs at the end).
+# address on every chain (redeploy them all; this script regenerates the SDK and CRE configs at the end).
 testnet_grad
 # The grid must be explicit: Deploy.s.sol defaults to the production grid and refuses demo / daily / mocks off testnets.
 export TREASURY=$ME GUARDIAN=$ME DEMO=false GRID=daily MOCKS=false SALT=${SALT:-$TESTNET_SALT}
 
 FROM=${2:-deploy}
-steps=(deploy fund pools seed trade vaults); started=0
+steps=(deploy fund pools seed trade vaults market seatlp); started=0
 for st in "${steps[@]}"; do [ "$st" = "$FROM" ] && started=1; done
-[ $started = 1 ] || { echo "unknown step $FROM (deploy | fund | pools | seed | trade | vaults)"; exit 1; }
+[ $started = 1 ] || { echo "unknown step $FROM (deploy | fund | pools | seed | trade | vaults | market | seatlp)"; exit 1; }
 started=0
 for st in "${steps[@]}"; do
   [ "$st" = "$FROM" ] && started=1
@@ -47,6 +52,8 @@ for st in "${steps[@]}"; do
     seed) run "seed two-sided books" script/Seed.s.sol 0 ;;
     trade) trade_rounds ;;
     vaults) bigblocks on; run "vaults" script/CreateVaults.s.sol 1; bigblocks off ;;
+    market) bigblocks on; run "position market" script/DeployPositionMarket.s.sol 1; bigblocks off ;;
+    seatlp) bigblocks on; run "seat LP tokens" script/DeploySeatLP.s.sol 1; bigblocks off ;;
   esac
   unset RESUME # only the first step resumes
   [ "${UNTIL:-}" != "$st" ] || break
