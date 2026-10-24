@@ -44,14 +44,18 @@ contract Router {
     }
 
     /// @notice Repay on behalf of the caller: moves the caller's R here, pays K from the caller, returns the asset.
-    function repay(bytes32 poolId, uint96 units) external {
+    /// Units lent through Specials and not returned by the cutoff are paid in forfeited margin instead (decision A):
+    /// the core credits it to this router's pending, which holds nothing else between calls, so it is withdrawn
+    /// straight to the caller.
+    function repay(bytes32 poolId, uint96 units) external returns (uint256 assetOut, uint256 marginOut) {
         IConfluere.PoolView memory v = core.pool(poolId);
         uint256 pay = Clearing.quoteUp(units, v.key.strike, 10 ** uint256(v.assetDecimals));
         IConfluere6909(address(core)).transferFrom(msg.sender, address(this), poolId.rId(), units);
         IERC20(v.key.quote).safeTransferFrom(msg.sender, address(this), pay);
         IERC20(v.key.quote).forceApprove(address(core), pay);
-        core.repay(poolId, units);
-        IERC20(v.key.asset).safeTransfer(msg.sender, units);
+        (assetOut, marginOut) = core.repay(poolId, units);
+        if (assetOut != 0) IERC20(v.key.asset).safeTransfer(msg.sender, assetOut);
+        if (marginOut != 0) core.withdraw(v.key.quote, msg.sender);
     }
 
     /// @notice Claim several closed pools at once and forward everything to the caller.
