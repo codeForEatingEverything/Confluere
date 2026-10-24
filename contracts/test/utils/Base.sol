@@ -36,6 +36,7 @@ abstract contract Base is Test {
     address internal bob = makeAddr("bob"); // lender
     address internal carol = makeAddr("carol"); // lender
     address internal eve = makeAddr("eve"); // searcher / bidder
+    address internal specials = makeAddr("specials"); // stands in for the Specials periphery
 
     function setUp() public virtual {
         vm.warp(ANCHOR + 1 days);
@@ -63,6 +64,10 @@ abstract contract Base is Test {
         c.grid = GridConfig({anchor: ANCHOR, period: WEEK, batchInterval: BATCH, maxExpiries: 4});
         c.maxOrdersPerSide = 8;
         c.maxBids = 4;
+        c.autoSellDiscountBps = 9000;
+        c.autoSellTtl = 4;
+        c.lendCutoff = 12 hours;
+        c.specials = specials;
         c.chains = new Confluere.ChainParams[](1);
         c.chains[0].chainId = block.chainid;
         c.chains[0].windowBlocks = WINDOW;
