@@ -302,7 +302,7 @@ contract ScriptChecks is Script {
         require(vm.parseJsonAddress(vm.readFile(file), ".vaults.nativeLend") == x, "extra pair: vault moved");
         new Seed().run();
         (uint64 head,) = core.bookHead(ids[8], SELL);
-        (,, uint96 units,,,,) = core.order(ids[8], head);
+        (,,, uint96 units,,,,) = core.order(ids[8], head);
         require(units == 3 * 5e6, "extra pair: not seeded at EXTRA_SEED_UNIT_BPS"); // head = the 3-unit sell at 94% K
         vm.setEnv("EXTRA_ASSET", vm.toString(address(0)));
         vm.setEnv("EXTRA_SEED_UNIT_BPS", "10000");
