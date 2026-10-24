@@ -98,12 +98,76 @@ export function impliedApr(price: bigint, strike: bigint, secondsToExpiry: numbe
 export const haircut = (price: bigint, strike: bigint): number =>
   strike === 0n ? 0 : Number(strike - price) / Number(strike);
 
-/** The contract's 2-significant-digit strike grid: strip trailing zeros, the rest must be < 10 ** digits. */
-export function isGridStrike(strike: bigint, digits = 2): boolean {
-  if (strike <= 0n) return false;
-  let s = strike;
-  while (s % 10n === 0n) s /= 10n;
-  return s < 10n ** BigInt(digits);
+// ------------------------------------------------------------ 1% log strike grid (Grid.sol, bit-identical)
+
+export const GRID_RAY = 10n ** 27n;
+export const GRID_STEP = 101n * 10n ** 25n; // 1.01 in RAY, exact
+export const MAX_STRIKE_INDEX = 4095;
+const UINT96_MAX = (1n << 96n) - 1n;
+
+/** 1.01^m in RAY by repeated squaring, every product rounded down; line-by-line copy of Grid.growth. */
+export function gridGrowth(m: number): bigint {
+  let r = GRID_RAY;
+  let b = GRID_STEP;
+  let k = BigInt(m);
+  while (k !== 0n) {
+    if ((k & 1n) === 1n) r = (r * b) / GRID_RAY;
+    k >>= 1n;
+    if (k !== 0n) b = (b * b) / GRID_RAY;
+  }
+  return r;
+}
+
+/** Strike at grid index n: one whole quote unit times 1.01^n, rounded down (Grid.strikeAt). */
+export function strikeAt(n: number, quoteDecimals: number): bigint {
+  const unit = 10n ** BigInt(quoteDecimals);
+  return n >= 0 ? (unit * gridGrowth(n)) / GRID_RAY : (unit * GRID_RAY) / gridGrowth(-n);
+}
+
+/** K is on the grid at index n: |n| <= 4095, 0 < K <= uint96 max, K == strikeAt(n) and n is the smallest such index. */
+export function isGridStrike(strike: bigint, n: number, quoteDecimals: number): boolean {
+  if (n > MAX_STRIKE_INDEX || n < -MAX_STRIKE_INDEX || strike <= 0n || strike > UINT96_MAX) return false;
+  if (strikeAt(n, quoteDecimals) !== strike) return false;
+  return n === -MAX_STRIKE_INDEX || strikeAt(n - 1, quoteDecimals) < strike;
+}
+
+/** Smallest n with strikeAt(n) >= strike (Grid.indexOf binary search); `ok` tells whether strike is on the grid. */
+export function gridIndexOf(strike: bigint, quoteDecimals: number): { n: number; ok: boolean } {
+  let lo = -MAX_STRIKE_INDEX;
+  let hi = MAX_STRIKE_INDEX;
+  while (lo < hi) {
+    const mid = Math.floor((lo + hi) / 2);
+    if (strikeAt(mid, quoteDecimals) >= strike) hi = mid;
+    else lo = mid + 1;
+  }
+  return { n: lo, ok: isGridStrike(strike, lo, quoteDecimals) };
+}
+
+/** Canonical index of an on-grid strike, or undefined when the strike is off the grid. */
+export function strikeIndexOf(strike: bigint, quoteDecimals: number): number | undefined {
+  const { n, ok } = gridIndexOf(strike, quoteDecimals);
+  return ok ? n : undefined;
+}
+
+/** The canonical grid strikes just below-or-at and just above `price` (quote base units per whole asset). */
+export function nearestGridStrikes(price: bigint, quoteDecimals: number): { below?: { n: number; strike: bigint }; above?: { n: number; strike: bigint } } {
+  const { n } = gridIndexOf(price, quoteDecimals);
+  const k = strikeAt(n, quoteDecimals);
+  const out: { below?: { n: number; strike: bigint }; above?: { n: number; strike: bigint } } = {};
+  if (k === price) {
+    out.below = { n, strike: k };
+    for (let m = n + 1; m <= MAX_STRIKE_INDEX; m++) {
+      const s = strikeAt(m, quoteDecimals);
+      if (s > k) { out.above = { n: m, strike: s }; break; }
+    }
+  } else {
+    if (k > price && k <= UINT96_MAX) out.above = { n: gridIndexOf(k, quoteDecimals).n, strike: k };
+    if (n > -MAX_STRIKE_INDEX) {
+      const s = strikeAt(n - 1, quoteDecimals);
+      if (s > 0n) out.below = { n: gridIndexOf(s, quoteDecimals).n, strike: s };
+    }
+  }
+  return out;
 }
 
 /** Next expiry strictly after `now` on the grid. */
@@ -116,13 +180,49 @@ export const nextBatchAt = (anchor: number, interval: number, lastSettledBatch: 
 
 /**
  * End of the batch a seat holder missed, using the evidence pool's own batch length; mirrors SeatRegistry.slash.
- * The missed batch is the pool's first full batch after the base batch of the holder's last quote.
+ * v0.8: the holder must miss `batches` (default 2) consecutive full batches of the pool after the base batch of the
+ * holder's last quote.
  */
-export function missedBatchEnd(anchor: number, baseInterval: number, lastQuotedBatch: number, poolInterval: number): number {
+export function missedBatchEnd(anchor: number, baseInterval: number, lastQuotedBatch: number, poolInterval: number, batches = 2): number {
   const quotedEnd = anchor + (lastQuotedBatch + 1) * baseInterval;
   const start = anchor + Math.ceil((quotedEnd - anchor) / poolInterval) * poolInterval;
-  return start + poolInterval;
+  return start + batches * poolInterval;
 }
 
 /** Human label for a pool's batch cadence (0 / 1 / 2 -> every base interval, 12x, 48x). */
 export const cadenceMultiplier = (cadence: number): number => (cadence === 0 ? 1 : cadence === 1 ? 12 : 48);
+
+/** Standard price band (bps) for a pair class: pegged 150, main 800, long tail 1500. */
+export const standardBand = (cls: "pegged" | "main" | "longtail"): number => (cls === "pegged" ? 150 : cls === "main" ? 800 : 1500);
+
+// ------------------------------------------------------------ Specials (in-kind lending, decision A)
+
+/** Minimum margin Specials must post to lend `units`: ceil(units * lastClearingPrice * 12000 / (scale * 10000)). */
+export const lendMinMargin = (units: bigint, lastPrice: bigint, scale: bigint): bigint =>
+  (units * lastPrice * 12_000n + scale * BPS - 1n) / (scale * BPS);
+
+/** Quote margin a repayer gets for `uShort` overdue units: all of it for the last ones, else pro rata rounded down. */
+export function shortMarginShare(uShort: bigint, shortUnits: bigint, shortMargin: bigint): bigint {
+  if (uShort === 0n || shortUnits === 0n) return 0n;
+  return uShort >= shortUnits ? shortMargin : (shortMargin * uShort) / shortUnits;
+}
+
+/** Physical asset a pool can hand out: assetBal - lentUnits - shortUnits. */
+export const physicalAsset = (assetBal: bigint, lentUnits: bigint, shortUnits: bigint): bigint => {
+  const x = assetBal - lentUnits - shortUnits;
+  return x > 0n ? x : 0n;
+};
+
+/** What repay(units) returns with overdue lending: asset first, the rest as K-equivalent margin compensation. */
+export function repayOutcome(units: bigint, assetBal: bigint, lentUnits: bigint, shortUnits: bigint, shortMargin: bigint): { assetOut: bigint; uShort: bigint; marginOut: bigint } {
+  const phys = physicalAsset(assetBal, lentUnits, shortUnits);
+  const assetOut = units < phys ? units : phys;
+  let uShort = units - assetOut;
+  if (uShort > shortUnits) uShort = shortUnits;
+  return { assetOut, uShort, marginOut: shortMarginShare(uShort, shortUnits, shortMargin) };
+}
+
+// ------------------------------------------------------------ autoSell (decision B)
+
+/** Limit of the pool-owned autoSell order: K * (10000 - discountBps) / 10000, rounded down. */
+export const autoSellLimit = (strike: bigint, discountBps: bigint | number): bigint => (strike * (BPS - BigInt(discountBps))) / BPS;

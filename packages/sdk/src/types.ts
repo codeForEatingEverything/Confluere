@@ -50,6 +50,10 @@ export type PoolKey = {
   expiry: bigint;
   strike: bigint;
   kind: Kind;
+  /** Price band of the pool in bps: 150, 800 or 1500 (part of the pool id since v0.8). */
+  bandBps: number;
+  /** Batch cadence: 0 / 1 / 2 -> 1 / 12 / 48 times the base interval (part of the pool id since v0.8). */
+  cadence: number;
 };
 
 export enum Kind {
@@ -62,7 +66,9 @@ export enum Status {
   Open = 1,
   Window = 2,
   Closing = 3,
-  Closed = 4,
+  /** autoSell sub-state after the window: the defaulted asset rests as a sell order in the next expiry's pool. */
+  Selling = 4,
+  Closed = 5,
 }
 
 export enum Side {
