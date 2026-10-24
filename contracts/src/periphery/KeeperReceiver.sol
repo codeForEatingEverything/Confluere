@@ -60,7 +60,10 @@ contract KeeperReceiver is IReceiver {
                         settled++;
                     } catch {}
                 }
-            } else if ((v.status == Status.Window && block.number >= v.windowEnd) || v.status == Status.Closing) {
+            } else if (
+                (v.status == Status.Window && block.number >= v.windowEnd) || v.status == Status.Closing
+                    || v.status == Status.Selling
+            ) {
                 try core.closeWindow(pid, maxBidsPerClose) {
                     closed++;
                 } catch {}
