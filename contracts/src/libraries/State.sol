@@ -42,7 +42,7 @@ struct CoreState {
     mapping(bytes32 => PoolState) pools;
     mapping(bytes32 => mapping(uint8 => Book)) books;
     mapping(bytes32 => mapping(uint64 => Order)) orders;
-    mapping(bytes32 => mapping(uint64 => bytes32)) rolloverOld;
+    mapping(bytes32 => mapping(uint64 => bytes32)) linkedPool; // order in a new pool -> its source pool (rollover)
     mapping(bytes32 => mapping(uint64 => IConfluere.MarketStats)) stats;
     mapping(bytes32 => mapping(uint64 => mapping(uint256 => uint256))) tierVolume; // market -> expiry -> tier -> quote
     mapping(address => mapping(address => uint256)) pending;
@@ -210,8 +210,8 @@ library CoreLib {
         uint8 side = o.side;
         if (side == SELL || side == NC_SELL) {
             if (o.flags & FLAG_ROLLOVER != 0) {
-                s.lockedR[owner][s.rolloverOld[poolId][id]] -= o.units;
-                delete s.rolloverOld[poolId][id];
+                s.lockedR[owner][s.linkedPool[poolId][id]] -= o.units;
+                delete s.linkedPool[poolId][id];
                 if (o.escrow != 0) s.pending[ps.key.quote][owner] += o.escrow;
             } else if (o.units != 0) {
                 s.pending[ps.key.asset][owner] += o.units;
@@ -223,15 +223,19 @@ library CoreLib {
         emit IConfluere.OrderRemoved(poolId, id, reason);
     }
 
-    /// @notice Whether an order may trade in the settlement numbered `sc`.
-    function live(CoreState storage s, bytes32 poolId, uint64 id, Order storage o, uint32 sc)
+    /// @notice Whether an order may trade in the settlement numbered `sc`, whose batch is followed by a boundary at
+    /// `nextBoundary`. A rollover trades while the old pool's window runs, and also in the new pool's last batch
+    /// before the old pool expires (blueprint 3.7 #5): the old pool's K is then paid in full one batch early.
+    function live(CoreState storage s, bytes32 poolId, uint64 id, Order storage o, uint32 sc, uint256 nextBoundary)
         internal
         view
         returns (bool)
     {
         if (o.deadline <= sc) return false;
         if (o.flags & FLAG_ROLLOVER == 0) return true;
-        return windowOpen(s, s.pools[s.rolloverOld[poolId][id]]);
+        PoolState storage op = s.pools[s.linkedPool[poolId][id]];
+        return windowOpen(s, op)
+            || (op.status == Status.Open && block.timestamp < op.key.expiry && nextBoundary >= op.key.expiry);
     }
 
     /// @notice Whether the pool's repayment window is running. Windows are aligned per expiry: after expiry a pool
