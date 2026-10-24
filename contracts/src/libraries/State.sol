@@ -31,8 +31,9 @@ struct PoolState {
     uint256 quoteBal; // quote owned by C holders
     uint256 assetBal; // asset owned by the pool (backs outstanding R, then C after close)
     uint256 surplusBal; // abandonment-auction surplus owed to R holders
-    uint256 sumPU; // sum(price * units) over fills, for vwap
-    uint256 sumUnits;
+    uint256 feeEscrow; // spread share withheld from sellers at clearing, split at close by the repaid fraction
+    uint256 filledUnits; // units ever filled (= C minted)
+    uint256 repaidUnits; // units whose K was paid in full: repay, rollover, abandonment-auction fill
     uint256 closeRemaining; // unrepaid R units still open to bids during Closing
 }
 
@@ -46,9 +47,9 @@ struct CoreState {
     mapping(address => mapping(address => uint256)) pending;
     mapping(address => mapping(bytes32 => uint256)) lockedR;
     mapping(bytes32 => bool) graduated;
-    mapping(address => uint256) graduationVolume;
+    mapping(address => uint256) graduationFee; // per quote token: treasury fees an expiry must earn to count
     mapping(address => uint256) minNotional; // per quote token: smallest order, valued at K (anti-dust)
-    mapping(bytes32 => uint256) marketFees; // cumulative spread share per market, in its quote token (seat split)
+    mapping(bytes32 => uint256) marketFees; // cumulative treasury fees per market (trade fees + spread share)
     mapping(address => uint256) flashFees; // cumulative flash-loan fees per token (not tied to a market)
     mapping(uint64 => uint64) windowEnd; // per expiry: one repayment window for every pool, set by the first mature()
     // ERC-6909 ledger
@@ -101,8 +102,11 @@ library CoreLib {
         return 10 ** uint256(ps.assetDecimals);
     }
 
-    function vwap(PoolState storage ps) internal view returns (uint256) {
-        return ps.sumUnits == 0 ? 0 : ps.sumPU / ps.sumUnits;
+    /// @notice Counts treasury fees toward the market's graduation at this expiry. Saturating: never blocks.
+    function addFees(CoreState storage s, PoolState storage ps, uint256 amount) internal {
+        IConfluere.MarketStats storage st = s.stats[ps.marketId][ps.key.expiry];
+        uint256 f = uint256(st.fees) + amount;
+        st.fees = f > type(uint128).max ? type(uint128).max : uint128(f);
     }
 
     function newOrderId(CoreState storage s) internal returns (uint64 id) {
