@@ -10,6 +10,7 @@ import {IConfluere} from "../interfaces/IConfluere.sol";
 import {PoolKeyLib, Kind, Status} from "../libraries/PoolKey.sol";
 import {GridConfig} from "../libraries/Grid.sol";
 import {SELL, BUY} from "../libraries/OrderSet.sol";
+import {Settlement} from "../libraries/Settlement.sol";
 import {Clearing} from "../libraries/Clearing.sol";
 
 /// @title SeatRegistry
@@ -199,7 +200,7 @@ contract SeatRegistry is ReentrancyGuardTransient {
 
         (address token, uint256 amount) = p.side == SELL
             ? (v.key.asset, uint256(p.units))
-            : (v.key.quote, Clearing.quoteUp(p.units, p.limit, scale) + p.ttl);
+            : (v.key.quote, Settlement.buyEscrow(p.units, p.limit, scale, p.ttl));
         IERC20(token).safeTransferFrom(msg.sender, address(this), amount);
         IERC20(token).forceApprove(address(core), amount);
         IConfluere.OrderParams memory o = p;
