@@ -70,11 +70,36 @@ abstract contract Base is Test {
     // ------------------------------------------------------------ helpers
 
     function _key(uint128 strike, Kind kind, uint64 expiry) internal view returns (PoolKey memory) {
-        return PoolKey({asset: address(weth), quote: address(usdc), expiry: expiry, strike: strike, kind: kind});
+        return _keyT(strike, kind, expiry, 800, 0);
+    }
+
+    function _keyT(uint128 strike, Kind kind, uint64 expiry, uint16 band, uint8 cadence)
+        internal
+        view
+        returns (PoolKey memory)
+    {
+        return PoolKey({
+            asset: address(weth),
+            quote: address(usdc),
+            expiry: expiry,
+            strike: strike,
+            kind: kind,
+            bandBps: band,
+            cadence: cadence
+        });
+    }
+
+    function _noOpts() internal pure returns (IConfluere.PoolOptions memory) {
+        return IConfluere.PoolOptions(0, 0, 0, false);
+    }
+
+    /// @dev Creates a pool on any core instance (the strike index is derived here once the log grid needs it).
+    function _createKey(IConfluere c, PoolKey memory key, IConfluere.PoolOptions memory o) internal returns (bytes32) {
+        return c.createPool(key, o);
     }
 
     function _create(uint128 strike, Kind kind, uint64 expiry) internal returns (bytes32) {
-        return core.createPool(_key(strike, kind, expiry), 1000, 800);
+        return _createKey(core, _key(strike, kind, expiry), _noOpts());
     }
 
     function _create() internal returns (bytes32) {
