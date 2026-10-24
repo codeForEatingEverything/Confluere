@@ -31,7 +31,8 @@ abstract contract VaultBase is Base {
         for (uint64 i = 1; i <= 4; ++i) {
             uint64 e = ANCHOR + i * WEEK;
             vm.warp(e - 3 days);
-            bytes32 pid = _create(K, Kind.American, e);
+            // the target's tier: the vault invests in the main tier (strike, band, cadence) of the last expiry
+            bytes32 pid = _createKey(core, _keyT(K, Kind.American, e, 800, _cadence()), _noOpts());
             _sell(alice, pid, ONE, 2900e6);
             _buy(bob, pid, ONE, 2900e6);
             _settle(pid);

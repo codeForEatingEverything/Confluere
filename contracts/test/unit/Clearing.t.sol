@@ -215,8 +215,8 @@ contract ClearingTest is Base {
         bytes32 m = PoolKeyLib.marketId(address(weth), address(usdc), Kind.American);
         IConfluere.MarketStats memory st = core.marketStats(m, E1);
         assertEq(st.volume, 2900e6);
-        assertEq(st.minStrike, K);
-        assertEq(st.maxStrike, K);
+        assertEq(st.mainStrike, K);
+        assertEq(st.mainVolume, st.volume);
     }
 
     function _seedPrice(uint256 p) internal {
