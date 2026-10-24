@@ -15,6 +15,7 @@ struct PoolState {
     bytes32 marketId;
     Status status;
     uint8 assetDecimals;
+    int16 strikeIndex; // n on the 1% log grid: strike == Grid.strikeAt(n, quoteDecimals)
     bool autoSell; // pool option: at close, defaulted asset is sold into the next expiry's pool of the same tier
     uint8 bandFailures;
     uint32 settleCount;
