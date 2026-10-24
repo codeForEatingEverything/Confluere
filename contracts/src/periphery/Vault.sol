@@ -180,13 +180,12 @@ contract Vault is ERC20, IERC7540, ReentrancyGuardTransient {
         bytes32 m = PoolKeyLib.marketId(token, _quote, kind);
         if (!core.graduated(m)) return (bytes32(0), 0, 0);
         IConfluere.MarketStats memory st = core.marketStats(m, targetExpiry - core.grid().period);
-        uint96 strike = strikeRule == StrikeRule.LowestTraded ? st.minStrike : st.maxStrike;
+        // main tier of the last expiry (both rules until the high-tier scan lands in the periphery change)
+        uint96 strike = st.mainStrike;
         if (strike == 0) return (bytes32(0), 0, 0);
-        for (uint8 c; c < 3; ++c) {
-            bytes32 pid = PoolKey(token, _quote, targetExpiry, strike, kind, 800, c).toId();
-            IConfluere.PoolView memory v = core.pool(pid);
-            if (v.status == Status.Open) return (pid, strike, v.settleCount);
-        }
+        bytes32 pid = PoolKey(token, _quote, targetExpiry, strike, kind, st.mainBand, st.mainCadence).toId();
+        IConfluere.PoolView memory v = core.pool(pid);
+        if (v.status == Status.Open) return (pid, strike, v.settleCount);
         return (bytes32(0), 0, 0);
     }
 
