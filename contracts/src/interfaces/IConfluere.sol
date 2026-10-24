@@ -36,6 +36,7 @@ interface IConfluere {
         uint64 lastSettledBatch;
         uint64 windowEnd;
         uint64 pausedUntil;
+        uint64 pausedBlocks;
         uint96 lastClearingPrice;
         uint96 bandBase;
         uint256 quoteBal;
@@ -93,7 +94,7 @@ interface IConfluere {
     event WindowClosed(bytes32 indexed poolId, uint256 quoteBal, uint256 assetBal, uint256 surplusBal);
     event Claimed(bytes32 indexed poolId, address indexed account, uint256 quoteOut, uint256 assetOut);
     event Withdrawn(address indexed token, address indexed account, address to, uint256 amount);
-    event Paused(bytes32 indexed poolId, uint64 untilBlock);
+    event Paused(bytes32 indexed poolId, uint64 untilBlock, uint64 pausedBlocks);
     event PoolGraduated(bytes32 indexed marketId, uint64 lastExpiry);
     event FlashLoan(address indexed receiver, address indexed token, uint256 amount, uint256 fee);
 
