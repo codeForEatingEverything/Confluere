@@ -46,6 +46,10 @@ interface IConfluere {
         uint256 filledUnits;
         uint256 repaidUnits;
         uint256 closeRemaining;
+        uint128 lentUnits;
+        uint128 lentMargin;
+        uint128 shortUnits;
+        uint128 shortMargin;
         PoolOptions options;
         uint64 batchInterval;
     }
@@ -85,7 +89,20 @@ interface IConfluere {
         uint256 tradeFees,
         uint256 capBase // competitive-only crossing volume q0: non-competitive units are capped at half of it
     );
-    event Repaid(bytes32 indexed poolId, address indexed payer, uint256 units, uint256 quotePaid);
+    /// @dev assetOut units of asset were delivered; for the rest (lent units not returned by the cutoff) the payer
+    /// was credited marginOut of forfeited margin (pending, pull).
+    event Repaid(
+        bytes32 indexed poolId,
+        address indexed payer,
+        uint256 units,
+        uint256 quotePaid,
+        uint256 assetOut,
+        uint256 marginOut
+    );
+    event Lent(bytes32 indexed poolId, address indexed to, uint256 units, uint256 margin, uint256 fee);
+    event LentReturned(bytes32 indexed poolId, uint256 units, uint256 marginOut, address marginTo);
+    event LentToppedUp(bytes32 indexed poolId, uint256 amount);
+    event ShortRecorded(bytes32 indexed poolId, uint256 shortUnits, uint256 shortMargin);
     event FeeEscrowSplit(
         bytes32 indexed poolId, uint256 toTreasury, uint256 toLenders, uint256 repaidUnits, uint256 filledUnits
     );
@@ -120,7 +137,14 @@ interface IConfluere {
     function cancelOrder(bytes32 poolId, uint64 orderId) external;
     function purge(bytes32 poolId, uint64[] calldata orderIds) external;
     function settleBatch(bytes32 poolId) external;
-    function repay(bytes32 poolId, uint96 units) external;
+    function repay(bytes32 poolId, uint96 units) external returns (uint256 assetOut, uint256 marginOut);
+    /// @notice Specials only: lend `units` of a European pool's asset to `to` against `margin` (>= 120% of units at
+    /// the last clearing price) and a lending fee that goes to the pool's C holders. Before the cutoff only.
+    function lend(bytes32 poolId, uint96 units, address to, uint128 margin, uint128 fee) external;
+    /// @notice Specials only: return lent units before the cutoff and release `marginOut` to `marginTo` (pending).
+    function returnLent(bytes32 poolId, uint96 units, uint128 marginOut, address marginTo) external;
+    /// @notice Specials only: add margin to the pool's lent position before the cutoff.
+    function topUpLent(bytes32 poolId, uint128 amount) external;
     function mature(bytes32 poolId) external;
     function bid(bytes32 poolId, uint96 units, uint96 surplusPerUnit, uint64 hint) external returns (uint64 orderId);
     function closeWindow(bytes32 poolId, uint256 maxBids) external returns (bool done);
@@ -170,4 +194,9 @@ interface IConfluere {
     function lockedR(address account, bytes32 poolId) external view returns (uint256);
     function grid() external view returns (GridConfig memory);
     function WINDOW_BLOCKS() external view returns (uint64);
+    function MAX_PAUSE_BLOCKS() external view returns (uint64);
+    function SPECIALS() external view returns (address);
+    function LEND_CUTOFF() external view returns (uint64);
+    function AUTOSELL_DISCOUNT_BPS() external view returns (uint16);
+    function AUTOSELL_TTL() external view returns (uint16);
 }
