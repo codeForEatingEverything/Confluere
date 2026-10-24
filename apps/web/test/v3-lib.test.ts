@@ -154,6 +154,9 @@ describe("vocabulary", () => {
     expect(networkName({ id: 31337, name: "Anvil", testnet: true })).toBe("Local (anvil)");
     expect(priceSource(998, WETH, USDC)).toBe("HyperCore spot");
     expect(priceSource(10143, "0xa3", "0xa4", { lst: "0xA3", native: "0xa4", assetSymbol: "shMON" })).toBe("shMON's own rate");
+    expect(networkName({ id: 11155111, name: "Sepolia", testnet: true })).toBe("Sepolia Testnet");
+    expect(priceSource(11155111, "0xa1", "0xa2")).toBe("ETH / USD spot (mainnet)");
+    expect(priceSource(11155111, "0xa3", "0xa4", { lst: "0xA3", native: "0xa4", assetSymbol: "wstETH" })).toBe("wstETH's own rate");
   });
   it("formats: dates without middle dots, waits in words, dollar tokens with two decimals", () => {
     expect(fmtExpiry(Date.UTC(2026, 9, 13, 9, 0) / 1000)).toBe("Tue 13 Oct, 09:00 UTC");
