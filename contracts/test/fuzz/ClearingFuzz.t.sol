@@ -5,7 +5,7 @@ import {Base} from "../utils/Base.sol";
 import {IConfluere} from "../../src/interfaces/IConfluere.sol";
 import {Settlement} from "../../src/libraries/Settlement.sol";
 import {Clearing} from "../../src/libraries/Clearing.sol";
-import {Grid, GridConfig} from "../../src/libraries/Grid.sol";
+import {Grid} from "../../src/libraries/Grid.sol";
 
 contract ClearingFuzzTest is Base {
     uint256[] internal sl;
@@ -111,12 +111,18 @@ contract ClearingFuzzTest is Base {
         assertLe(p, hi);
     }
 
-    function testFuzz_gridStrike(uint64 mantissa, uint8 zeros) public pure {
-        GridConfig memory g = GridConfig(0, 1, 1, 1, 2);
-        uint256 m_ = bound(mantissa, 1, 99);
-        uint256 z = bound(zeros, 0, 20);
-        assertTrue(Grid.isGridStrike(g, m_ * 10 ** z));
-        uint256 three = bound(mantissa, 101, 999);
-        if (three % 10 != 0) assertFalse(Grid.isGridStrike(g, three * 10 ** z));
+    /// After removing collisions (only the smallest index of a value counts) the grid is strictly increasing, and
+    /// every canonical index round-trips through indexOf.
+    function testFuzz_gridStrictlyIncreasingAfterDedup(int16 n, uint8 qdSeed) public pure {
+        uint8 qd = uint8(bound(qdSeed, 0, 24));
+        int256 i = bound(int256(n), -4094, 2400);
+        uint256 a = Grid.strikeAt(i, qd);
+        uint256 b = Grid.strikeAt(i + 1, qd);
+        assertGe(b, a);
+        if (a == 0 || a > type(uint96).max) return;
+        (int256 j, bool ok) = Grid.indexOf(a, qd);
+        assertTrue(ok);
+        assertLe(j, i);
+        assertEq(Grid.strikeAt(j, qd), a);
     }
 }
