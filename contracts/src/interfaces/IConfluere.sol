@@ -41,7 +41,9 @@ interface IConfluere {
         uint256 quoteBal;
         uint256 assetBal;
         uint256 surplusBal;
-        uint256 vwap;
+        uint256 feeEscrow;
+        uint256 filledUnits;
+        uint256 repaidUnits;
         uint256 closeRemaining;
         PoolOptions options;
         uint64 batchInterval;
@@ -49,6 +51,7 @@ interface IConfluere {
 
     struct MarketStats {
         uint128 volume; // quote traded at this expiry across the market
+        uint128 fees; // treasury fees earned at this expiry: trade fees at clearing + spread share at close
         uint96 minStrike; // lowest strike with any fill at this expiry
         uint96 maxStrike; // highest strike with any fill at this expiry
         bool bad; // paused or circuit breaker tripped at this expiry
@@ -67,11 +70,21 @@ interface IConfluere {
         uint32 deadline
     );
     event OrderRemoved(bytes32 indexed poolId, uint64 indexed orderId, uint8 reason);
-    event OrderFilled(bytes32 indexed poolId, uint64 indexed orderId, uint256 units, uint256 quoteAmount);
+    event OrderFilled(bytes32 indexed poolId, uint64 indexed orderId, uint256 units, uint256 quoteAmount, uint256 fee);
     event BatchSettled(
-        bytes32 indexed poolId, uint32 indexed settleIndex, uint256 price, uint256 competitiveUnits, uint256 ncUnits
+        bytes32 indexed poolId,
+        uint32 indexed settleIndex,
+        uint256 price,
+        uint256 competitiveUnits,
+        uint256 ncUnits,
+        uint256 spreadToEscrow,
+        uint256 tradeFees,
+        uint256 capBase // competitive-only crossing volume q0: non-competitive units are capped at half of it
     );
-    event Repaid(bytes32 indexed poolId, address indexed payer, uint256 units, uint256 quotePaid, uint256 fee);
+    event Repaid(bytes32 indexed poolId, address indexed payer, uint256 units, uint256 quotePaid);
+    event FeeEscrowSplit(
+        bytes32 indexed poolId, uint256 toTreasury, uint256 toLenders, uint256 repaidUnits, uint256 filledUnits
+    );
     event RolledOver(
         bytes32 indexed oldPoolId, bytes32 indexed newPoolId, address indexed owner, uint256 units, uint256 topUp
     );
@@ -130,7 +143,6 @@ interface IConfluere {
     function bookHead(bytes32 poolId, uint8 side) external view returns (uint64 head, uint32 count);
     function findHint(bytes32 poolId, uint8 side, uint96 limit) external view returns (uint64);
     function nextBatchAt(bytes32 poolId) external view returns (uint256);
-    function vwap(bytes32 poolId) external view returns (uint256);
     function graduated(bytes32 marketId) external view returns (bool);
     /// @notice Block at which the shared repayment window of `expiry` ends; 0 until the first pool of it matures.
     function expiryWindowEnd(uint64 expiry) external view returns (uint64);
