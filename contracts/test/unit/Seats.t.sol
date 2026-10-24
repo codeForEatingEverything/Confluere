@@ -112,16 +112,17 @@ contract SeatsTest is Base {
         _assertSolvent();
     }
 
-    function test_feeSplit_seatGets35pct() public {
+    function test_split_70before_graduation() public {
         _buy(alice, PRICE, DEPOSIT);
         _sell(dave, pid, ONE, 2900e6);
         _buy(bob, pid, ONE, 2900e6);
         _settle(pid);
         vm.prank(dave);
-        core.repay(pid, uint96(ONE)); // fee = 10% of (3000 - 2900) = 10 USDC
-        assertEq(core.marketFees(market), 10e6);
+        core.repay(pid, uint96(ONE)); // no fee on repay; the spread share waits in the escrow until close
+        assertEq(core.marketFees(market), 2 * 435_000, "trade fees, 0.015% each side");
         reg.split(address(weth), address(usdc), Kind.American);
-        assertEq(reg.claimable(address(usdc), alice), 3.5e6, "35% to the seat");
+        assertEq(reg.shareBps(market), 7000, "not graduated");
+        assertEq(reg.claimable(address(usdc), alice), 609_000, "70% to the seat before graduation");
         uint256 protocolBefore = reg.claimable(address(usdc), protocolMs);
         reg.split(address(weth), address(usdc), Kind.American); // idempotent
         assertEq(reg.claimable(address(usdc), protocolMs), protocolBefore);
@@ -129,7 +130,7 @@ contract SeatsTest is Base {
         uint256 a0 = usdc.balanceOf(alice);
         vm.prank(alice);
         reg.withdraw(address(usdc)); // pulls the fees out of the core
-        assertEq(usdc.balanceOf(alice) - a0, 3.5e6);
+        assertEq(usdc.balanceOf(alice) - a0, 609_000);
         _assertSolvent();
     }
 
@@ -193,8 +194,7 @@ contract SeatsTest is Base {
 
     /// With a 6-hour long-tail pool as evidence, missing a 30-minute base batch is not a miss; a whole 6-hour batch is.
     function test_slashUsesTheEvidencePoolsBatchLength() public {
-        bytes32 slow =
-            core.createPoolWithOptions(_key(3100e6, Kind.American, E1), 1000, 1500, IConfluere.PoolOptions(1, 0, 0, 0));
+        bytes32 slow = _createKey(core, _keyT(K_HI, Kind.American, E1, 1500, 1), _noOpts());
         _buy(alice, PRICE, DEPOSIT);
         _post(alice, ONE, 2800e6);
         vm.warp(block.timestamp + 2 * BATCH); // two base batches without quoting
@@ -220,7 +220,7 @@ contract SeatsTest is Base {
         // the order belongs to the holder in the core
         _post(alice, ONE, 2800e6);
         (uint64 head,) = core.bookHead(pid, BUY);
-        (address owner,,,,,,) = core.order(pid, head);
+        (address owner,,,,,,,) = core.order(pid, head);
         assertEq(owner, alice);
     }
 

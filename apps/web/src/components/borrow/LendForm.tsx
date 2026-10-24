@@ -8,7 +8,7 @@ import Link from "next/link";
 import { useState } from "react";
 import { useConnection } from "wagmi";
 import type { Hex } from "viem";
-import { quoteDown, scaleOf } from "@confluere/sdk";
+import { quoteDown, quoteUp, scaleOf, tradeFee } from "@confluere/sdk";
 import { useActiveChain } from "@/lib/activeChain";
 import { launchTokensOf } from "@/lib/chains";
 import { useAccountOrders, useMinNotional, usePools, useTokens, tokenOf, type PoolRow } from "@/lib/data";
@@ -134,10 +134,10 @@ function LendFormFor({ pool, onClose, embedded }: { pool: PoolRow; onClose?: () 
 
   // facts per 1 unit of collateral until an amount is typed (Pendle PT panel: rate, maturity, payout before input)
   const units = amt > 0n && q.units > 0n ? q.units : 10n ** BigInt(A.decimals);
-  const paid = amt > 0n ? amt : quoteDown(units, price, scale);
+  const fee = tradeFee(quoteUp(units, price, scale)); // v0.8: 0.015% on the lender's side, included in the amount
+  const paid = amt > 0n ? amt : quoteUp(units, price, scale) + fee;
   const payout = quoteDown(units, f.netPerUnit || bbPrice, scale);
   const per = amt > 0n ? "" : ` per 1 ${A.symbol}`;
-  const fee = (quoteDown(units, bbPrice, scale) - payout);
   const ft = positionName("ft", pool, A, Q, { all: allPools ?? [] });
 
   return (
@@ -164,12 +164,12 @@ function LendFormFor({ pool, onClose, embedded }: { pool: PoolRow; onClose?: () 
         <DetailRows
           rows={[
             amt > 0n && q.units > 0n && { k: "You receive", v: <span title={ft.symbol}>≈ {fmtToken(q.units, { symbol: ft.short, decimals: A.decimals })}</span>, hint: `1 C = 1 ${A.symbol} of backing`, testId: "lend-receive" },
-            { k: "Fixed rate", v: price > 0n ? rateText(f, pool.expiry - now) : "—", hint: "net of the protocol's share" },
+            { k: "Fixed rate", v: price > 0n ? rateText(f, pool.expiry - now) : "—", hint: "net of the 0.015% trade fee" },
             { k: `You pay${per}`, v: <>≈ {fmtToken(paid, Q)}</>, hint: price > 0n ? `${fmtPer(price, Q)} ${Q.symbol} per ${A.symbol}` : undefined },
             { k: `Paid back${per}`, v: fmtToken(payout, Q), hint: `on ${fmtChip(pool.expiry)} UTC, if repaid` },
             !own && { k: "Worst case", v: worst.priced ? rateText(worst, pool.expiry - now) : "—", hint: `you pay at most ${fmtPer(cap, Q)} per ${A.symbol}` },
             { k: "Collateral", v: `${A.symbol}, bought back at ${fmtPer(bbPrice, Q)}`, hint: refUnits ? `${pct(Number(bbPrice - refUnits) / Number(refUnits), 1)} vs market (reference)` : undefined },
-            { k: "Fee", v: fee > 0n ? fmtToken(fee, Q) : "None", hint: "share of the interest, only if repaid" },
+            { k: "Trade fee", v: fee > 0n ? fmtToken(fee, Q) : "None", hint: "0.015%, included in what you pay; the 5% share of the interest comes from the borrower's side", testId: "lend-fee" },
             { k: "Repayment", v: repaysAnyTime(pool) ? "Any time" : "At maturity", hint: repaysAnyTime(pool) ? "you may be paid back early" : undefined },
           ]}
         />

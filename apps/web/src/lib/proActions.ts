@@ -94,13 +94,16 @@ export type NewMarket = {
   kind: Kind;
   feeBps: number;
   guardBps: number;
+  /** v0.8 PoolOptions.autoSell; the pre-v0.8 createPool ABI has no slot for it, so it is sent once the SDK is regenerated. */
+  autoSell?: boolean;
   slow: number;
   minVolume: bigint;
   firstLow: bigint;
   firstHigh: bigint;
 };
 
-export const marketKey = (m: Pick<NewMarket, "asset" | "quote" | "expiry" | "buyBack" | "kind">) => ({ asset: m.asset, quote: m.quote, expiry: BigInt(m.expiry), strike: m.buyBack, kind: m.kind });
+/** v0.8 PoolKey: band and cadence are part of the pool id (V08 spec §2.3). */
+export const marketKey = (m: Pick<NewMarket, "asset" | "quote" | "expiry" | "buyBack" | "kind" | "guardBps" | "slow">) => ({ asset: m.asset, quote: m.quote, expiry: BigInt(m.expiry), strike: m.buyBack, kind: m.kind, bandBps: m.guardBps, cadence: m.slow });
 
 export const openMarketWrite = (core: Address, m: NewMarket): Write => ({
   label: "Open market",

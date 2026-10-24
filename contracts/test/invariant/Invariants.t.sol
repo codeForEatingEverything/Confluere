@@ -23,6 +23,7 @@ contract InvariantsTest is Test {
     MockERC20 internal usdc;
     Handler internal h;
     address internal treasury = makeAddr("treasury");
+    address internal constant SPECIALS = address(0x5bec1a15); // the handler pranks as Specials
 
     function setUp() public {
         vm.warp(ANCHOR + 1 days);
@@ -30,9 +31,13 @@ contract InvariantsTest is Test {
         weth = new MockERC20("WETH", "WETH", 18);
         usdc = new MockERC20("USDC", "USDC", 6);
         Confluere.Config memory c;
-        c.grid = GridConfig(ANCHOR, WEEK, 30 minutes, 4, 2);
+        c.grid = GridConfig(ANCHOR, WEEK, 30 minutes, 4);
         c.maxOrdersPerSide = 8;
         c.maxBids = 4;
+        c.autoSellDiscountBps = 9000;
+        c.autoSellTtl = 4;
+        c.lendCutoff = 12 hours;
+        c.specials = SPECIALS;
         c.chains = new Confluere.ChainParams[](1);
         c.chains[0].chainId = block.chainid;
         c.chains[0].windowBlocks = 7200;
@@ -46,10 +51,21 @@ contract InvariantsTest is Test {
         weth.approve(address(core), type(uint256).max);
         usdc.approve(address(core), type(uint256).max);
         bytes32[] memory ps = new bytes32[](3);
-        ps[0] = core.createPool(PoolKey(address(weth), address(usdc), ANCHOR + WEEK, 3000e6, Kind.American), 1000, 800);
-        ps[1] =
-            core.createPool(PoolKey(address(weth), address(usdc), ANCHOR + 2 * WEEK, 3000e6, Kind.American), 1000, 800);
-        ps[2] = core.createPool(PoolKey(address(weth), address(usdc), ANCHOR + WEEK, 3100e6, Kind.European), 1500, 150);
+        ps[0] = core.createPool(
+            PoolKey(address(weth), address(usdc), ANCHOR + WEEK, 3_010_966_302, Kind.American, 800, 0),
+            805,
+            IConfluere.PoolOptions(0, 0, 0, true) // autoSell into ps[1], the next expiry of the same tier
+        );
+        ps[1] = core.createPool(
+            PoolKey(address(weth), address(usdc), ANCHOR + 2 * WEEK, 3_010_966_302, Kind.American, 800, 0),
+            805,
+            IConfluere.PoolOptions(0, 0, 0, false)
+        );
+        ps[2] = core.createPool(
+            PoolKey(address(weth), address(usdc), ANCHOR + WEEK, 3_102_201_591, Kind.European, 150, 0),
+            808,
+            IConfluere.PoolOptions(0, 0, 0, false)
+        );
 
         address[] memory as_ = new address[](4);
         for (uint256 i; i < 4; ++i) {
@@ -65,7 +81,13 @@ contract InvariantsTest is Test {
             vm.stopPrank();
         }
         targetContract(address(h));
-        bytes4[] memory sel = new bytes4[](18);
+        weth.mint(SPECIALS, 1e24);
+        usdc.mint(SPECIALS, 1e15);
+        vm.startPrank(SPECIALS);
+        weth.approve(address(core), type(uint256).max);
+        usdc.approve(address(core), type(uint256).max);
+        vm.stopPrank();
+        bytes4[] memory sel = new bytes4[](22);
         sel[0] = Handler.place.selector;
         sel[1] = Handler.place.selector;
         sel[2] = Handler.cancel.selector;
@@ -84,6 +106,10 @@ contract InvariantsTest is Test {
         sel[15] = Handler.purge.selector;
         sel[16] = Handler.pause.selector;
         sel[17] = Handler.placeLocked.selector;
+        sel[18] = Handler.lend.selector;
+        sel[19] = Handler.returnLent.selector;
+        sel[20] = Handler.topUpLent.selector;
+        sel[21] = Handler.warpPastCutoff.selector;
         targetSelector(FuzzSelector(address(h), sel));
     }
 
@@ -94,8 +120,8 @@ contract InvariantsTest is Test {
         uint256 poolQuote;
         for (uint256 i; i < h.poolsLength(); ++i) {
             IConfluere.PoolView memory v = core.pool(h.pools(i));
-            poolAsset += v.assetBal;
-            poolQuote += v.quoteBal + v.surplusBal;
+            poolAsset += v.assetBal - v.lentUnits - v.shortUnits; // lent and short units are not here
+            poolQuote += v.quoteBal + v.surplusBal + v.feeEscrow + v.lentMargin + v.shortMargin;
         }
         (uint256 pendAsset, uint256 pendQuote) = _pending();
         assertEq(weth.balanceOf(address(core)), escAsset + poolAsset + pendAsset, "asset accounting");
@@ -137,6 +163,50 @@ contract InvariantsTest is Test {
         assertFalse(h.pushedDuringNoPushCall(), "token left during a no-push call");
     }
 
+    /// @dev Invariant 3c: the guardian's pause budget per pool is cumulative and a running pause cannot be extended.
+    function invariant_pauseCap() public view {
+        assertFalse(h.pauseExtended(), "running pause extended");
+        for (uint256 i; i < h.poolsLength(); ++i) {
+            assertLe(core.pool(h.pools(i)).pausedBlocks, 1000, "pause budget exceeded");
+        }
+    }
+
+    /// @dev Invariant 3b: lending only in European pools, by Specials, before the cutoff, at most half of the pool,
+    /// and every unit of margin escrowed is accounted for: still lent or short, released, paid to a repayer, or
+    /// forfeited to C holders.
+    function invariant_lending() public view {
+        assertFalse(h.lendingRule(), "a lending call broke the rules");
+        for (uint256 i; i < h.poolsLength(); ++i) {
+            bytes32 pid = h.pools(i);
+            IConfluere.PoolView memory v = core.pool(pid);
+            if (v.key.kind == Kind.American) {
+                assertEq(v.lentUnits + v.lentMargin + v.shortUnits + v.shortMargin, 0, "American pool lent");
+            }
+            assertLe(v.lentUnits, v.assetBal / 2, "more than half lent");
+            if (v.status == Status.Closed) assertEq(v.shortUnits + v.shortMargin, 0, "short left after close");
+            assertEq(h.marginIn(pid), h.marginOut(pid) + v.lentMargin + v.shortMargin, "margin conservation");
+        }
+    }
+
+    /// @dev Invariant 3d: no stranded funds. A Selling pool's order rests in its target with exactly the units it
+    /// marks; a Closed pool has no order, no escrow, no lent or short units, and no R held by the core.
+    function invariant_noStrandedFunds() public view {
+        for (uint256 i; i < h.poolsLength(); ++i) {
+            bytes32 pid = h.pools(i);
+            IConfluere.PoolView memory v = core.pool(pid);
+            if (v.status == Status.Selling) {
+                assertGt(v.autoSellUnits, 0, "selling without units");
+                (address owner,,, uint96 units,,,,) = core.order(v.autoSellPool, v.autoSellOrder);
+                assertEq(owner, address(core), "autoSell order missing");
+                assertEq(units, v.autoSellUnits, "order units != marked units");
+            }
+            if (v.status == Status.Closed) {
+                assertEq(v.autoSellUnits + v.feeEscrow + v.shortUnits + v.shortMargin, 0, "stranded after close");
+                assertEq(core.balanceOf(address(core), pid.rId()), 0, "core R after close");
+            }
+        }
+    }
+
     /// @dev Blueprint 3.5: pools of one expiry share a window however late each is matured.
     function invariant_windowsAligned() public view {
         assertFalse(h.windowMisaligned(), "window not aligned per expiry");
@@ -162,10 +232,10 @@ contract InvariantsTest is Test {
     function _escrows() internal view returns (uint256 a, uint256 q) {
         for (uint256 i; i < h.refsLength(); ++i) {
             (bytes32 pid, uint64 id) = h.refs(i);
-            (address owner, uint8 side, uint96 units,, uint128 escrow,,) = core.order(pid, id);
+            (address owner, uint8 side,, uint96 units,, uint128 escrow,,) = core.order(pid, id);
             if (owner == address(0)) continue;
             if (side == SELL || side == NC_SELL) {
-                if (core.rolloverSource(pid, id) != bytes32(0)) q += escrow;
+                if (core.linkedPool(pid, id) != bytes32(0)) q += escrow;
                 else a += units;
             } else {
                 q += escrow;
@@ -176,6 +246,8 @@ contract InvariantsTest is Test {
     function _pending() internal view returns (uint256 a, uint256 q) {
         a = core.pending(address(weth), treasury);
         q = core.pending(address(usdc), treasury);
+        a += core.pending(address(weth), SPECIALS);
+        q += core.pending(address(usdc), SPECIALS);
         for (uint256 i; i < h.actorsLength(); ++i) {
             address who = h.actors(i);
             a += core.pending(address(weth), who);

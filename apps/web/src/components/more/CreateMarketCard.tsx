@@ -4,18 +4,17 @@
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { isAddress, type Address } from "viem";
-import { Kind, cadenceMultiplier, isGridStrike, poolId } from "@confluere/sdk";
+import { Kind, cadenceMultiplier, poolId } from "@confluere/sdk";
 import { useActiveChain } from "@/lib/activeChain";
 import { onchainSymbol, tokenOf, useGrid, usePools, usePoolStatus, useTokens } from "@/lib/data";
 import { isNative, isWrappedNative, nativeTokenOf, NATIVE, useNativeBalance, wrappedNativeOf } from "@/lib/native";
 import { tokenName } from "@/lib/logos";
 import { launchTokens, wrapWrite } from "@/lib/tokens";
 import { useBalances } from "@/lib/position";
-import { BAND_TIERS, FEE_TIERS, gridExpiries, nearestGridStrikes } from "@/lib/grid";
+import { BAND_TIERS, gridExpiries, isLogGridStrike, nearestGridStrikes, standardBand } from "@/lib/grid";
 import { fmtChip, fmtPer, fmtToken, fmtWait, parseAmount, toInput } from "@/lib/format";
 import { marketKey, openMarketWrite } from "@/lib/proActions";
 import { STYLE_LABEL } from "@/lib/vocab";
-import { priceDigits } from "@/lib/view";
 import { useTx, type Write } from "@/lib/tx";
 import { AmountInput, Button, Card, ChipRow, Disclosure, Segmented, TokenButton, TokenSelect, TxErrorLine, useLiveNow } from "../ui";
 import { WalletAction } from "../layout/WalletMenu";
@@ -36,7 +35,10 @@ export function CreateMarketCard() {
   const [kind, setKind] = useState<Kind>(Kind.American);
   const [expiry, setExpiry] = useState<number>();
   const [bbStr, setBb] = useState("");
-  const [fee, setFee] = useState(1000);
+  // pre-v0.8 cores still take a feeBps argument; v0.8 fixes the spread share at 5% and ignores the tier
+  const fee = 1000;
+  const [autoSell, setAutoSell] = useState(true);
+  const [guardTouched, setGuardTouched] = useState(false);
   const [guard, setGuard] = useState(800);
   const [slow, setSlow] = useState(0);
   const [minVol, setMinVol] = useState("");
@@ -55,7 +57,6 @@ export function CreateMarketCard() {
   /** What the token button shows: the coin when it was picked, the wrapped token's own name when that was. */
   const shown = (picked: string, t?: { symbol: string; onchainSymbol?: string }) => (!t ? undefined : isNative(picked) ? nat.symbol : isWrappedNative(chainId, picked) ? onchainSymbol(t) : t.symbol);
   const nativeBal = useNativeBalance(chainId);
-  const digits = priceDigits(grid);
   const base = grid?.batchInterval ?? deployment?.batchInterval ?? 1800;
   const period = grid?.period ?? deployment?.gridPeriod ?? 3600;
   const expiries = now ? gridExpiries(grid?.anchor ?? deployment?.gridAnchor ?? 0, period, now, Math.min(grid?.maxExpiries ?? 8, 8)) : [];
@@ -64,13 +65,17 @@ export function CreateMarketCard() {
     if (!expiry && firstExpiry) setExpiry(firstExpiry);
   }, [expiry, firstExpiry]);
   const bb = Q ? parseAmount(bbStr, Q.decimals) : 0n;
-  const bbOk = bb > 0n && isGridStrike(bb, digits);
-  const near = Q && bb > 0n ? nearestGridStrikes(bb, digits) : undefined;
+  const bbOk = !!Q && bb > 0n && isLogGridStrike(bb, Q.decimals);
+  const near = Q && bb > 0n ? nearestGridStrikes(bb, Q.decimals) : undefined;
+  const std = A && Q ? standardBand(A.symbol, Q.symbol) : 800;
+  useEffect(() => {
+    if (!guardTouched) setGuard(std);
+  }, [std, guardTouched]);
   const loV = Q ? parseAmount(lo, Q.decimals) : 0n;
   const hiV = Q ? parseAmount(hi, Q.decimals) : 0n;
   const minV = A ? parseAmount(minVol, A.decimals) : 0n;
   const tooSlow = (c: number) => base * cadenceMultiplier(c) > period;
-  const m = A && Q && expiry && bbOk ? { asset: A.address, quote: Q.address, expiry, buyBack: bb, kind, feeBps: fee, guardBps: guard, slow, minVolume: minV, firstLow: loV, firstHigh: hiV } : undefined;
+  const m = A && Q && expiry && bbOk ? { asset: A.address, quote: Q.address, expiry, buyBack: bb, kind, feeBps: fee, guardBps: guard, autoSell, slow, minVolume: minV, firstLow: loV, firstHigh: hiV } : undefined;
   const pid = m ? poolId(marketKey(m)) : undefined;
   const exists = (usePoolStatus(pid).data ?? 0) !== 0;
   const bal = useBalances(useMemo(() => [...new Set([...known, ...(A ? [A.address] : []), ...(Q ? [Q.address] : [])].map((a) => a.toLowerCase()))] as Address[], [known, A, Q])).data;
@@ -137,7 +142,7 @@ export function CreateMarketCard() {
             onChange={setBb}
             decimals={Q?.decimals ?? 18}
             token={<TokenButton symbol={Q?.symbol} />}
-            error={bb > 0n && !bbOk ? `Use at most ${digits} significant digits` : undefined}
+            error={bb > 0n && !bbOk ? "Not on the 1% price grid" : undefined}
           />
           {near && Q && (
             <p className="text-caption text-ink-2">
@@ -152,10 +157,17 @@ export function CreateMarketCard() {
             </p>
           )}
         </div>
-        <ChipRow label="Fee" value={fee} onChange={setFee} options={FEE_TIERS.map((f) => ({ value: f.bps, label: f.label }))} />
+        <p className="text-caption text-ink-2">Fees are fixed for every market: borrowers pay 5% of the interest plus 0.015% of the amount traded; lenders pay 0.015%.</p>
+        <label className="flex items-start gap-2 text-body-sm">
+          <input type="checkbox" className="mt-1" checked={autoSell} onChange={(e) => setAutoSell(e.target.checked)} aria-label="Auto-sell defaulted collateral" />
+          <span>
+            Auto-sell defaulted collateral
+            <span className="block text-caption text-ink-3">At window end, unrepaid collateral is offered in the next maturity of this market so lenders get the loan asset back; what does not sell is claimable in kind. Vaults only lend into markets with this on.</span>
+          </span>
+        </label>
         <div className="space-y-1">
-          <ChipRow label="Market-order price range" helper="Market orders fill only within this range of the last price." value={guard} onChange={setGuard} options={BAND_TIERS.map((b) => ({ value: b.bps, label: `±${b.bps / 100}%` }))} />
-          <p className="text-caption text-ink-3">{GUARD_NAME[guard]}. At-market orders only fill this close to last traded.</p>
+          <ChipRow label="Market-order price range" helper="Market orders fill only within this range of the last price." value={guard} onChange={(g) => { setGuardTouched(true); setGuard(g); }} options={BAND_TIERS.map((b) => ({ value: b.bps, label: `±${b.bps / 100}%` }))} />
+          <p className="text-caption text-ink-3">{GUARD_NAME[guard]}. At-market orders only fill this close to last traded.{guard === std ? " Standard for this pair: listed on Borrow and Lend." : " Not the standard range for this pair: the market shows only under Markets."}</p>
         </div>
         <Disclosure title="More settings">
           <div className="space-y-3">
@@ -168,14 +180,14 @@ export function CreateMarketCard() {
           </div>
         </Disclosure>
         <p className="text-caption leading-[18px] text-ink-3">
-          One market per set of settings; the first creator sets the fee and the market-order price range. New markets are not vault-eligible until they have traded cleanly for four maturities, and the guardian may pause them for up to 7 days at a time.
+          One market per set of settings; the first creator sets the market-order price range and auto-sell. New markets are not vault-eligible until they have traded cleanly for four maturities, and the guardian may pause them for up to 7 days at a time.
         </p>
         {exists && <p className="text-body-sm text-warn">A market with these exact settings already exists.</p>}
         {A && Q && !hasUnits && <p className="text-caption text-ink-3">You need a tiny amount of both tokens: the contract checks that each one transfers normally.</p>}
         <TxErrorLine error={tx.lastError} />
         <WalletAction>
           <Button variant="primary" size="lg" block disabled={!m || exists || !hasUnits || badRange || tx.busy} loading={tx.busy} onClick={() => void go()}>
-            {!A || !Q ? "Select both assets" : A.address === Q.address ? "Pick two different assets" : !expiry ? "Pick a maturity" : !bbStr ? "Enter a buy-back price" : !bbOk ? `Use at most ${digits} significant digits` : exists ? "This market exists" : badRange ? "Low is above high" : !hasUnits ? "Need a little of both assets" : "Create market"}
+            {!A || !Q ? "Select both assets" : A.address === Q.address ? "Pick two different assets" : !expiry ? "Pick a maturity" : !bbStr ? "Enter a buy-back price" : !bbOk ? "Pick a grid price" : exists ? "This market exists" : badRange ? "Low is above high" : !hasUnits ? "Need a little of both assets" : "Create market"}
           </Button>
         </WalletAction>
       </Card>

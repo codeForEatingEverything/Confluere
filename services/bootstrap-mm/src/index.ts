@@ -33,7 +33,7 @@ for (const s of (env.POOLS ?? "").split(",").filter(Boolean)) {
   pools.push({ id, cls: classOf(v.key.asset, v.key.quote, d.pools) });
 }
 // Cumulative spend per pool, the first start and the exit must survive restarts, or the published caps and the
-// 8-week limit would reset on every redeploy.
+// exit would reset on every redeploy.
 const stateFile = env.STATE_FILE ?? `bootstrap-mm-state-${chainId}.json`;
 const raw = existsSync(stateFile) ? JSON.parse(readFileSync(stateFile, "utf8")) : {};
 const saved: Saved = raw.spent ? raw : { spent: raw }; // older files held only the spend map
@@ -47,6 +47,7 @@ const bot = new Bot(
     total: BigInt(env.TOTAL_QUOTE ?? "0"),
     endAt: Number(env.END_AT ?? 0),
     leadS: Number(env.LEAD_S ?? 90),
+    exitWeeklyVolume: BigInt(env.EXIT_WEEKLY_VOLUME ?? "0"),
   },
   saved,
   save,

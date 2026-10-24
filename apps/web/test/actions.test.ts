@@ -63,7 +63,7 @@ describe("lendWrites", () => {
   });
   it("limit: escrow covers units at the limit plus the rounding reserve", async () => {
     const w = await lendWrites(ctx(), { pool: row(pid("01")) as never, amount: 0n, quote, mode: "limit", units: E18, limit: 2800_000000n, ttl: 4 });
-    expect((w[0]!.args as any[])[1]).toBe(2800_000004n);
+    expect((w[0]!.args as any[])[1]).toBe(2800_000000n + 420000n + 8n); // cost at limit + 0.015% fee + 2 wei per batch
     expect((w[1]!.args as any[])[1]).toMatchObject({ side: Side.Buy, units: E18, limit: 2800_000000n, hint: 42n });
   });
 });
@@ -87,7 +87,7 @@ describe("rollover", () => {
   it("plan: floor from the new pool's price, top-up for the gap, ttl within bounds", () => {
     const p = rolloverPlan({ from, to, units: E18, now: NOW, spb: 1 }, 300);
     expect(p.minPrice).toBe(2871_000000n);
-    expect(p.maxTopUp).toBe(129_000000n + 2n * BigInt(p.ttl));
+    expect(p.maxTopUp).toBe(129_000000n + 430650n + 6_450000n + 4n * BigInt(p.ttl)); // gap + trade fee + 5% of (K − floor)
     expect(p.ttl).toBeGreaterThanOrEqual(200);
     expect(p.tries).toBe(2);
   });

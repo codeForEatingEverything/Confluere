@@ -12,9 +12,8 @@ import {SELL, BUY} from "../../src/libraries/OrderSet.sol";
 /// (cancellation cutoff) and the creator's first-auction price bounds.
 contract LongTailTest is Base {
     function _createWith(uint8 cadence, uint96 minFill, uint96 lo, uint96 hi) internal returns (bytes32) {
-        return core.createPoolWithOptions(
-            _key(K, Kind.American, E1), 1000, 1500, IConfluere.PoolOptions(cadence, minFill, lo, hi)
-        );
+        return
+            _createKey(core, _keyT(K, Kind.American, E1, 1500, cadence), IConfluere.PoolOptions(minFill, lo, hi, false));
     }
 
     function _cross(bytes32 pid, uint256 units, uint256 price) internal {
@@ -28,7 +27,7 @@ contract LongTailTest is Base {
         bytes32 pid = _createWith(1, 0, 0, 0); // 12 x 30 min
         IConfluere.PoolView memory v = core.pool(pid);
         assertEq(v.batchInterval, 6 hours);
-        assertEq(v.options.cadence, 1);
+        assertEq(v.key.cadence, 1);
         uint256 next = core.nextBatchAt(pid);
         assertEq((next - ANCHOR) % 6 hours, 0, "boundaries on the 6 h grid");
         _cross(pid, ONE, 2900e6);
@@ -50,7 +49,7 @@ contract LongTailTest is Base {
         bytes32 pid = _create();
         IConfluere.PoolView memory v = core.pool(pid);
         assertEq(v.batchInterval, BATCH);
-        assertEq(v.options.cadence, 0);
+        assertEq(v.key.cadence, 0);
         assertEq(v.options.minFill, 0);
     }
 
@@ -153,8 +152,7 @@ contract LongTailTest is Base {
         vm.prank(alice);
         core.cancelOrder(main, a); // mainstream: no cutoff
 
-        bytes32 pid =
-            core.createPoolWithOptions(_key(3100e6, Kind.American, E1), 1000, 1500, IConfluere.PoolOptions(1, 0, 0, 0)); // different strike: a separate pool from `main`
+        bytes32 pid = _createKey(core, _keyT(K_HI, Kind.American, E1, 1500, 1), _noOpts()); // different strike: a separate pool from `main`
         uint64 id = _order(alice, pid, SELL, ONE, 3500e6, 0, 1);
         vm.warp(core.nextBatchAt(pid));
         core.settleBatch(pid); // its single batch passes untraded: expired
@@ -175,15 +173,14 @@ contract LongTailTest is Base {
     function test_cadenceLongerThanPeriodRejected() public {
         // a demo grid: 1-hour expiries, 2-minute batches -> 48 x 2 min = 96 min > 1 h
         Confluere.Config memory c = _config();
-        c.grid =
-            GridConfig({anchor: ANCHOR, period: 1 hours, batchInterval: 2 minutes, maxExpiries: 4, strikeSigDigits: 2});
+        c.grid = GridConfig({anchor: ANCHOR, period: 1 hours, batchInterval: 2 minutes, maxExpiries: 4});
+        c.lendCutoff = 10 minutes;
         Confluere demo = new Confluere(c);
         weth.approve(address(demo), type(uint256).max);
         usdc.approve(address(demo), type(uint256).max);
         uint64 exp = ANCHOR + uint64((block.timestamp - ANCHOR) / 1 hours + 1) * 1 hours;
-        PoolKey memory key = PoolKey(address(weth), address(usdc), exp, K, Kind.American);
         vm.expectRevert(IConfluere.InvalidParams.selector);
-        demo.createPoolWithOptions(key, 1000, 800, IConfluere.PoolOptions(2, 0, 0, 0));
-        demo.createPoolWithOptions(key, 1000, 800, IConfluere.PoolOptions(1, 0, 0, 0)); // 24 min fits
+        _createKey(demo, _keyT(K, Kind.American, exp, 800, 2), _noOpts());
+        _createKey(demo, _keyT(K, Kind.American, exp, 800, 1), _noOpts()); // 24 min fits
     }
 }

@@ -46,6 +46,7 @@ contract Handler is Test {
     bool public pushedDuringNoPushCall;
     bool public windowMisaligned; // blueprint 3.5: every pool of an expiry shares one window
     bool public lockedCancelled; // a live locked order was cancelled
+    bool public pauseExtended; // invariant 3c: a running pause was extended
     FlashBorrower public borrower = new FlashBorrower();
     mapping(uint64 => bool) internal _locked;
 
@@ -56,7 +57,14 @@ contract Handler is Test {
         uint256 value;
         uint256 cSupply;
         uint256 rSupply;
+        uint256 out; // lent + short units: the forfeiture at close swaps them for their margin
+        bool selling; // autoSell fills trade the pool's asset for quote at the clearing price (invariant 4 allows it)
     }
+
+    address public constant SPECIALS = address(0x5bec1a15); // Invariants.setUp makes this the core's Specials
+    bool public lendingRule; // invariant 3b: a lending call that must fail succeeded
+    mapping(bytes32 => uint256) public marginIn; // margin and top-ups escrowed per pool
+    mapping(bytes32 => uint256) public marginOut; // margin released, paid to repayers, or forfeited to C holders
 
     /// @dev Invariant 4: a pool's value (quote + surplus + asset at K) never falls unless C or R was burned.
     modifier guarded() {
@@ -64,7 +72,8 @@ contract Handler is Test {
         _;
         Snap[] memory afterS = _snaps();
         for (uint256 i; i < before.length; ++i) {
-            bool burned = afterS[i].cSupply < before[i].cSupply || afterS[i].rSupply < before[i].rSupply;
+            bool burned = afterS[i].cSupply < before[i].cSupply || afterS[i].rSupply < before[i].rSupply
+                || afterS[i].out < before[i].out || before[i].selling;
             if (!burned && afterS[i].value < before[i].value) valueExtracted = true;
         }
     }
@@ -72,14 +81,17 @@ contract Handler is Test {
     function _snaps() internal view returns (Snap[] memory out) {
         out = new Snap[](pools.length);
         for (uint256 i; i < pools.length; ++i) {
-            IConfluere.PoolView memory v = core.pool(pools[i]);
-            uint256 scale = 10 ** uint256(v.assetDecimals);
-            out[i] = Snap(
-                v.quoteBal + v.surplusBal + v.assetBal * v.key.strike / scale,
-                core.totalSupply(pools[i].cId()),
-                core.totalSupply(pools[i].rId())
-            );
+            out[i] = _snap(pools[i]);
         }
+    }
+
+    function _snap(bytes32 pid) internal view returns (Snap memory sn) {
+        IConfluere.PoolView memory v = core.pool(pid);
+        sn.value = v.quoteBal + v.surplusBal + v.assetBal * v.key.strike / 10 ** uint256(v.assetDecimals);
+        sn.cSupply = core.totalSupply(pid.cId());
+        sn.rSupply = core.totalSupply(pid.rId());
+        sn.out = uint256(v.lentUnits) + v.shortUnits;
+        sn.selling = v.status == Status.Selling;
     }
 
     constructor(Confluere c, MockERC20 w, MockERC20 u, address t, bytes32[] memory ps, address[] memory as_) {
@@ -173,12 +185,12 @@ contract Handler is Test {
         calls++;
         if (refs.length == 0) return;
         Ref memory ref = refs[r % refs.length];
-        (address owner,,,,,,) = core.order(ref.pid, ref.id);
+        (address owner,,,,,,,) = core.order(ref.pid, ref.id);
         if (owner == address(0)) return;
         uint256 w = weth.balanceOf(address(core));
         uint256 u = usdc.balanceOf(address(core));
         IConfluere.PoolView memory v = core.pool(ref.pid);
-        (,,,,, uint32 deadline,) = core.order(ref.pid, ref.id);
+        (,,,,,, uint32 deadline,) = core.order(ref.pid, ref.id);
         bool live = v.status == Status.Open && block.timestamp < v.key.expiry && deadline > v.settleCount;
         vm.prank(a % 2 == 0 ? owner : _actor(a));
         try core.cancelOrder(ref.pid, ref.id) {
@@ -210,8 +222,9 @@ contract Handler is Test {
         uint256 price;
         for (uint256 j; j < logs.length; ++j) {
             if (logs[j].topics[0] == IConfluere.BatchSettled.selector) {
-                (uint256 pr, uint256 compUnits, uint256 ncUnits) = abi.decode(logs[j].data, (uint256, uint256, uint256));
-                if (ncUnits * 2 > compUnits) ncCapViolated = true;
+                (uint256 pr, uint256 compUnits, uint256 ncUnits,,, uint256 capBase) =
+                    abi.decode(logs[j].data, (uint256, uint256, uint256, uint256, uint256, uint256));
+                if (ncUnits * 2 > capBase || compUnits > capBase) ncCapViolated = true;
                 filledUnits[pid] += compUnits + ncUnits;
                 price = pr;
             }
@@ -247,8 +260,9 @@ contract Handler is Test {
         bool allowed =
             inWindow || (v.key.kind == Kind.American && v.status == Status.Open && block.timestamp < v.key.expiry);
         vm.prank(who);
-        try core.repay(pid, uint96(units)) {}
-        catch {
+        try core.repay(pid, uint96(units)) returns (uint256, uint256 m) {
+            marginOut[pid] += m;
+        } catch {
             if (allowed) repayFailed = true;
         }
     }
@@ -325,8 +339,79 @@ contract Handler is Test {
 
     function pause(uint256 p, uint256 blocks) external guarded {
         calls++;
+        bytes32 pid = _pool(p);
+        bool running = block.number < core.pool(pid).pausedUntil;
         vm.prank(address(0xdead)); // the guardian in Invariants.setUp
-        try core.pause(_pool(p), uint64(bound(blocks, 1, 1000))) {} catch {}
+        try core.pause(pid, uint64(bound(blocks, 1, 600))) {
+            if (running) pauseExtended = true;
+        } catch {}
+    }
+
+    function _marginOwed(bytes32 pid) internal view returns (Status, uint256) {
+        IConfluere.PoolView memory v = core.pool(pid);
+        return (v.status, uint256(v.lentMargin) + v.shortMargin);
+    }
+
+    // ------------------------------------------------------------ Specials lending (invariant 3b)
+
+    /// @dev Lend as Specials: bounded inside the rules most of the time, sometimes past the cap or under the margin
+    /// (those must revert), and sometimes from a non-Specials caller (must revert).
+    function lend(uint256 p, uint256 units, uint256 extra, uint256 fee, uint256 mode) external guarded {
+        calls++;
+        bytes32 pid = _pool(p);
+        (uint256 u, uint256 margin, bool legal) = _lendArgs(pid, units, extra, mode % 4);
+        vm.prank(mode % 4 == 3 ? _actor(mode) : SPECIALS);
+        try core.lend(pid, uint96(u), SPECIALS, uint128(margin), uint128(bound(fee, 0, 10e6))) {
+            if (!legal) lendingRule = true;
+            marginIn[pid] += margin;
+        } catch {}
+    }
+
+    /// @dev mode 0: inside the rules; 1: past the 50% cap; 2: one wei under the margin floor; 3: not Specials.
+    function _lendArgs(bytes32 pid, uint256 units, uint256 extra, uint256 mode)
+        internal
+        view
+        returns (uint256 u, uint256 margin, bool legal)
+    {
+        IConfluere.PoolView memory v = core.pool(pid);
+        uint256 room = v.assetBal / 2 > v.lentUnits ? v.assetBal / 2 - v.lentUnits : 0;
+        u = mode == 1 ? room + 1 : bound(units, 1, room == 0 ? 1 : room);
+        uint256 need = (u * uint256(v.lastClearingPrice) * 12_000 + 1e22 - 1) / 1e22;
+        margin = mode == 2 ? (need == 0 ? 0 : need - 1) : need + bound(extra, 0, 1000e6);
+        legal = mode == 0 && room != 0 && v.lastClearingPrice != 0 && v.key.kind == Kind.European
+            && v.status == Status.Open && block.timestamp + 12 hours < v.key.expiry && block.number >= v.pausedUntil;
+    }
+
+    function returnLent(uint256 p, uint256 units, uint256 all) external guarded {
+        calls++;
+        bytes32 pid = _pool(p);
+        IConfluere.PoolView memory v = core.pool(pid);
+        if (v.lentUnits == 0) return;
+        bool full = all % 3 == 0;
+        units = full ? v.lentUnits : bound(units, 1, v.lentUnits);
+        uint256 out = units == v.lentUnits ? v.lentMargin : uint256(v.lentMargin) * units / v.lentUnits;
+        vm.prank(SPECIALS);
+        try core.returnLent(pid, uint96(units), uint128(out), SPECIALS) {
+            marginOut[pid] += out;
+            if (block.timestamp + 12 hours >= v.key.expiry) lendingRule = true;
+        } catch {}
+    }
+
+    function topUpLent(uint256 p, uint256 amount) external guarded {
+        calls++;
+        bytes32 pid = _pool(p);
+        amount = bound(amount, 1, 100e6);
+        vm.prank(SPECIALS);
+        try core.topUpLent(pid, uint128(amount)) {
+            marginIn[pid] += amount;
+        } catch {}
+    }
+
+    /// @dev Jump past a pool's lending cutoff (but before its expiry) so short units get recorded.
+    function warpPastCutoff(uint256 p) external guarded {
+        calls++;
+        IConfluere.PoolView memory v = core.pool(_pool(p));
+        if (block.timestamp + 12 hours < v.key.expiry) vm.warp(v.key.expiry - 6 hours);
     }
 
     function placeBid(uint256 a, uint256 p, uint256 units, uint256 surplus) external guarded {
@@ -351,7 +436,10 @@ contract Handler is Test {
         bytes32 pid = _pool(p);
         uint256 w = weth.balanceOf(address(core));
         uint256 u = usdc.balanceOf(address(core));
-        try core.closeWindow(pid, bound(maxBids, 1, 3)) {} catch {}
+        (Status st, uint256 owed) = _marginOwed(pid);
+        try core.closeWindow(pid, bound(maxBids, 1, 3)) {
+            if (st == Status.Window) marginOut[pid] += owed; // forfeited to C holders when the window closes
+        } catch {}
         if (weth.balanceOf(address(core)) != w || usdc.balanceOf(address(core)) != u) pushedDuringNoPushCall = true;
     }
 

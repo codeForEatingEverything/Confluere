@@ -41,9 +41,13 @@ contract MedusaHarness {
         weth = new MockERC20("WETH", "WETH", 18);
         usdc = new MockERC20("USDC", "USDC", 6);
         Confluere.Config memory c;
-        c.grid = GridConfig(ANCHOR, WEEK, 30 minutes, 4, 2);
+        c.grid = GridConfig(ANCHOR, WEEK, 30 minutes, 4);
         c.maxOrdersPerSide = 6;
         c.maxBids = 4;
+        c.autoSellDiscountBps = 9000;
+        c.autoSellTtl = 4;
+        c.lendCutoff = 12 hours;
+        c.specials = address(this);
         c.chains = new Confluere.ChainParams[](1);
         c.chains[0].chainId = block.chainid;
         c.chains[0].windowBlocks = 50;
@@ -55,10 +59,16 @@ contract MedusaHarness {
         usdc.mint(address(this), 10);
         weth.approve(address(core), type(uint256).max);
         usdc.approve(address(core), type(uint256).max);
-        pools[0] =
-            core.createPool(PoolKey(address(weth), address(usdc), ANCHOR + WEEK, 3000e6, Kind.American), 1000, 800);
-        pools[1] =
-            core.createPool(PoolKey(address(weth), address(usdc), ANCHOR + WEEK, 3000e6, Kind.European), 1500, 150);
+        pools[0] = core.createPool(
+            PoolKey(address(weth), address(usdc), ANCHOR + WEEK, 3_010_966_302, Kind.American, 800, 0),
+            805,
+            IConfluere.PoolOptions(0, 0, 0, false)
+        );
+        pools[1] = core.createPool(
+            PoolKey(address(weth), address(usdc), ANCHOR + WEEK, 3_010_966_302, Kind.European, 150, 0),
+            805,
+            IConfluere.PoolOptions(0, 0, 0, false)
+        );
         for (uint256 i; i < 3; ++i) {
             weth.mint(actors[i], 1e24);
             usdc.mint(actors[i], 1e15);
@@ -176,7 +186,7 @@ contract MedusaHarness {
         for (uint256 i; i < 2; ++i) {
             IConfluere.PoolView memory v = core.pool(pools[i]);
             pa += v.assetBal;
-            pq += v.quoteBal + v.surplusBal;
+            pq += v.quoteBal + v.surplusBal + v.feeEscrow;
         }
         uint256 penA = core.pending(address(weth), TREASURY);
         uint256 penQ = core.pending(address(usdc), TREASURY);
@@ -244,7 +254,7 @@ contract MedusaHarness {
 
     function _escrows() internal view returns (uint256 a, uint256 q) {
         for (uint256 i; i < orderIds.length; ++i) {
-            (address owner, uint8 side, uint96 units,, uint128 escrow,,) = core.order(orderPools[i], orderIds[i]);
+            (address owner, uint8 side,, uint96 units,, uint128 escrow,,) = core.order(orderPools[i], orderIds[i]);
             if (owner == address(0)) continue;
             if (side == SELL || side == NC_SELL) a += units;
             else q += escrow;

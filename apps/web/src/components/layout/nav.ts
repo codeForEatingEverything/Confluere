@@ -26,6 +26,7 @@ export const TABS: NavItem[] = [
 
 /** The desktop More menu: the sample-data Demo above Developers. */
 export const MORE: { href: string; label: string }[] = [
+  { href: "/specials", label: "Specials" },
   { href: "/developers/demo", label: "Demo" },
   { href: "/developers", label: "Developers" },
 ];

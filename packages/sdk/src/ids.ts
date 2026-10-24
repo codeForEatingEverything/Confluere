@@ -10,6 +10,8 @@ const KEY_ABI = [
       { name: "expiry", type: "uint64" },
       { name: "strike", type: "uint128" },
       { name: "kind", type: "uint8" },
+      { name: "bandBps", type: "uint16" },
+      { name: "cadence", type: "uint8" },
     ],
   },
 ] as const;
@@ -36,3 +38,7 @@ export function marketId(asset: Hex, quote: Hex, kind: Kind): Hex {
     ),
   );
 }
+
+/** A tier of a market at one expiry: strike | bandBps << 128 | cadence << 144, as PoolKeyLib.tierKey. */
+export const tierKey = (strike: bigint, bandBps: number, cadence: number): bigint =>
+  strike | (BigInt(bandBps) << 128n) | (BigInt(cadence) << 144n);

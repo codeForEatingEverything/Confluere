@@ -28,15 +28,15 @@ const DIFFERENT = [
 const LIMITS = [
   "Once a position starts it is never closed early. A roll-over to the next maturity can fail to fill; the current position then stays as it is.",
   "In markets where you can repay any time, lenders may be paid back before the date.",
-  "Vault withdrawals can include borrowers' tokens from loans that were not repaid.",
+  "Vault withdrawals are paid in one token. A vault only lends into markets that sell unrepaid collateral into the next maturity, so a withdrawal can wait for that sale.",
   "Every loan of the same date shares one repayment window, counted in blocks after the date. A pause of the network pauses it too.",
   "If a token's issuer can freeze transfers, repaying, claiming and withdrawing that token stop while it is frozen.",
-  "Anyone can open a market. New markets are marked, vaults don't lend there yet, and a guardian may pause them for up to 7 days at a time.",
+  "Anyone can open a market. New markets are marked, vaults don't lend there yet, and a guardian may pause them for up to 7 days in total.",
 ];
 
 const SECURITY = [
   "Contracts are immutable: no owner, no upgrade, no admin keys.",
-  "Only privilege: a guardian may pause a new market for up to 7 days. It cannot move funds.",
+  "Only privilege: a guardian may pause a new market for up to 7 days in total. It cannot move funds.",
   "Internal audit, October 2026 (docs/AUDIT_2026-10-11.md on GitHub). No external audit yet.",
   deploymentLine(),
 ];
@@ -96,9 +96,21 @@ export function HowItWorks() {
       <section className="mt-8 space-y-3">
         <h2 className="text-title font-semibold">When you lend</h2>
         <p className="max-w-[65ch] text-body leading-6 text-ink-2">
-          You buy lender units below the buy-back price. If the borrower repays, you are paid the buy-back price, which is your fixed rate to maturity (minus the protocol&apos;s share of the interest). If not, you receive the collateral instead. A vault
+          You buy lender units below the buy-back price. If the borrower repays, you are paid the buy-back price, which is your fixed rate to maturity. If not, you receive the collateral instead. A vault
           lends for you by a rule fixed at deployment.
         </p>
+      </section>
+      <section className="mt-8 space-y-3" id="fees">
+        <h2 className="text-title font-semibold">Fees</h2>
+        <ul className="max-w-[65ch] list-disc space-y-1 pl-5 text-body leading-6 text-ink-2">
+          <li>Every trade pays 0.015% of its value on each side (0.03% in all). It goes to the protocol, repaid or not.</li>
+          <li>
+            5% of the interest (buy-back price minus the round&apos;s price) is taken from what the borrower receives and held in the market. When the repayment window
+            closes it is split by the share that was repaid: that part goes to the protocol, the rest goes to lenders, who kept the collateral instead.
+          </li>
+          <li>Repaying costs nothing beyond the buy-back price. Quotes on every card already include these fees.</li>
+          <li>A new market becomes established after four clean maturities in a row, each earning the protocol a fixed minimum in fees.</li>
+        </ul>
       </section>
       <section className="mt-8 space-y-3">
         <h2 className="text-title font-semibold">What never happens</h2>

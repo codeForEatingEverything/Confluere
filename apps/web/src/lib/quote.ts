@@ -5,8 +5,12 @@
  * A borrower sells `units` of collateral now at the round's price and buys them back for the buy-back price per unit
  * before the repayment window closes. A lender buys lender units at the round's price and is paid the buy-back price
  * per unit if the borrower buys back; otherwise the lender receives the collateral.
+ *
+ * Fees (v0.8, Settlement.sol): every fill pays a 0.015% trade fee on each side; the borrower's side also has 5% of
+ * the interest (K − price) withheld into the pool's fee escrow. Repayment carries no fee. At close the escrow splits by
+ * the repaid share: the repaid part goes to the treasury, the defaulted part to lenders.
  */
-import { impliedApr, quoteDown, repayAmount, scaleOf } from "@confluere/sdk";
+import { impliedApr, lenderCostPerUnit, ncUnits, quoteDown, quoteUp, repayAmount, scaleOf, sellSplit, tradeFee } from "@confluere/sdk";
 import type { PoolRow } from "./data";
 import { isPegged } from "./markets";
 import { fmtWait, pct } from "./format";
@@ -31,8 +35,16 @@ export type BorrowQuote = {
   price: bigint;
   /** True when the price is not the pool's own last traded price. */
   estimate: boolean;
+  /** What the borrower gets: gross − trade fee − 5% spread share. */
   receive: bigint;
+  /** units × price before fees. */
+  gross: bigint;
+  /** 0.015% trade fee on the gross. */
+  tradeFee: bigint;
+  /** 5% of (buy-back − price) × units, withheld into the pool's fee escrow. */
+  spreadShare: bigint;
   repay: bigint;
+  /** repay − receive: the interest plus every fee. */
   cost: bigint;
   /** cost / receive over this term. */
   periodReturn: number;
@@ -51,29 +63,42 @@ export function borrowQuote(i: { pool: PoolRow; units: bigint; ref?: bigint; now
   // a round never clears at or above the buy-back price (a lender is paid at most that at maturity), so an estimate
   // from the reference price is capped just below it; the rate is then 0, never negative
   const price = raw >= p.strike && p.strike > 0n ? p.strike - 1n : raw;
-  const receive = price > 0n ? quoteDown(i.units, price, scale) : 0n;
+  const split = price > 0n ? sellSplit(i.units, price, p.strike, scale) : { gross: 0n, trade: 0n, spread: 0n, net: 0n };
+  const receive = split.net;
   const repay = repayAmount(i.units, p.strike, scale);
   const cost = repay > receive ? repay - receive : 0n;
   const left = p.expiry - i.now;
   const move = BigInt(i.moveBps ?? defaultMoveBps(p));
+  const periodReturn = receive > 0n ? Number(cost) / Number(receive) : 0;
   return {
     price,
     estimate: !own || (!!i.limit && i.limit > 0n),
     receive,
+    gross: split.gross,
+    tradeFee: split.trade,
+    spreadShare: split.spread,
     repay,
     cost,
-    periodReturn: receive > 0n ? Number(cost) / Number(receive) : 0,
-    apr: price > 0n ? Math.max(0, impliedApr(price, p.strike, left)) : 0,
+    periodReturn,
+    apr: receive > 0n && left > 0 ? Math.max(0, (periodReturn * 365 * DAY) / left) : 0,
     showApr: left >= DAY,
     guard: (price * (BPS - move)) / BPS,
   };
 }
 
+/** What a borrower keeps from `units` sold at `price`, net of the trade fee and the 5% spread share (0 when unpriced). */
+export const netAtPrice = (p: Pick<PoolRow, "strike" | "assetDecimals">, units: bigint, price: bigint): bigint =>
+  price > 0n ? sellSplit(units, price, p.strike, scaleOf(p.assetDecimals)).net : 0n;
+
 export type LendQuote = {
   price: bigint;
   estimate: boolean;
-  /** Lender units the amount buys at that price. */
+  /** Lender units the amount buys at that price, the amount being all-in (cost + 0.015% trade fee). */
   units: bigint;
+  /** units × price, rounded up as the core charges a buyer. */
+  cost: bigint;
+  /** 0.015% trade fee on the cost. */
+  tradeFee: bigint;
   /** Paid if repaid: units × buy-back price. */
   payout: bigint;
   periodReturn: number;
@@ -89,16 +114,21 @@ export function lendQuote(i: { pool: PoolRow; amount: bigint; ref?: bigint; now:
   // a round never clears at or above the buy-back price (a lender is paid at most that at maturity), so an estimate
   // from the reference price is capped just below it; the rate is then 0, never negative
   const price = raw >= p.strike && p.strike > 0n ? p.strike - 1n : raw;
-  const units = price > 0n ? (i.amount * scale) / price : 0n;
+  const units = price > 0n ? ncUnits(i.amount, price, scale) : 0n;
+  const cost = price > 0n ? quoteUp(units, price, scale) : 0n;
+  const fee = tradeFee(cost);
   const payout = quoteDown(units, p.strike, scale);
   const left = p.expiry - i.now;
+  const paid = lenderCostPerUnit(price);
   return {
     price,
     estimate: !own || (!!i.limit && i.limit > 0n),
     units,
+    cost,
+    tradeFee: fee,
     payout,
-    periodReturn: price > 0n ? Math.max(0, Number(p.strike - price) / Number(price)) : 0,
-    apr: price > 0n ? Math.max(0, impliedApr(price, p.strike, left)) : 0,
+    periodReturn: price > 0n ? Math.max(0, Number(p.strike - paid) / Number(paid)) : 0,
+    apr: price > 0n ? Math.max(0, impliedApr(paid, p.strike, left)) : 0,
     showApr: left >= DAY,
   };
 }
@@ -119,15 +149,16 @@ export function minUnits(p: Pick<PoolRow, "strike" | "assetDecimals">, minNotion
 }
 
 /**
- * The lender's fixed return net of the protocol's spread share: if repaid the lender is paid K − feeBps × (K − price)
- * per unit (Settlement.fee, taken only on repayment, zero on default). Same shape as `fixedReturn`.
+ * The lender's fixed return net of fees (v0.8): the lender pays price + 0.015% trade fee per unit and is paid the full
+ * buy-back price K if repaid; the 5% spread share is withheld from the borrower's side, not the lender's (on default
+ * the lender also gets the defaulted part of the pool's fee escrow). Same shape as `fixedReturn`.
  */
-export function netReturn(p: Pick<PoolRow, "strike" | "lastClearingPrice" | "expiry" | "feeBps">, now: number, price = p.lastClearingPrice): { period: number; apr: number; showApr: boolean; priced: boolean; netPerUnit: bigint } {
+export function netReturn(p: Pick<PoolRow, "strike" | "lastClearingPrice" | "expiry">, now: number, price = p.lastClearingPrice): { period: number; apr: number; showApr: boolean; priced: boolean; netPerUnit: bigint } {
   if (price <= 0n) return { period: 0, apr: 0, showApr: false, priced: false, netPerUnit: 0n };
-  const fee = p.strike > price ? ((p.strike - price) * BigInt(p.feeBps ?? 0)) / BPS : 0n;
-  const net = p.strike - fee;
+  const net = p.strike;
+  const paid = lenderCostPerUnit(price);
   const left = p.expiry - now;
-  const period = Number(net - price) / Number(price);
+  const period = Number(net - paid) / Number(paid);
   return { period, apr: left > 0 ? (period * 365 * DAY) / left : 0, showApr: left >= DAY, priced: true, netPerUnit: net };
 }
 

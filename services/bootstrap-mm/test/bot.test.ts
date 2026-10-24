@@ -52,7 +52,7 @@ function world() {
       switch (fn) {
         case "pool":
           return {
-            key: { asset: ETH, quote: USD, expiry: 99_999n, strike: 1n, kind: 0 },
+            key: { asset: ETH, quote: USD, expiry: 99_999n, strike: 1n, kind: 0, bandBps: 800, cadence: 0 },
             status: s.status[pid] ?? Status.None,
             assetDecimals: 18,
             lastClearingPrice: 1_000_000n,
@@ -65,7 +65,7 @@ function world() {
           const o = s.orders.get(args[1] as bigint);
           const at = blockNumber ?? s.block;
           const live = o !== undefined && o.block <= at && (o.removedAt === undefined || o.removedAt > at);
-          return [live ? ME : ZERO, 1, 0n, 0n, 0n, 0, 0n];
+          return [live ? ME : ZERO, 1, 0, 0n, 0n, 0n, 0, 0n];
         }
         case "findHint":
           return 0n;
@@ -75,6 +75,8 @@ function world() {
           return s.pending;
         case "seats":
           return [ZERO, 0n, 0n, 0n];
+        case "marketStats":
+          return { volume: 0n, fees: 0n, mainVolume: 0n, mainStrike: 0n, mainIndex: 0, mainBand: 0, mainCadence: 0, bad: false };
         case "balanceOf":
           return s.cBalance[`0x${(args[1] as bigint).toString(16).padStart(64, "0")}` as Hex] ?? 0n;
       }

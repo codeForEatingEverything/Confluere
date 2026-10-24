@@ -133,7 +133,7 @@ contract AuditFindingsTest is Base {
         _buy(bob, pid, 4e16, 1000e6); // keeps the batch from crossing
         _settle(pid); // the tail (worst price, ttl 1) expires but is not at the head
         _sell(alice, pid, ONE, 2900e6); // worse than every live sell, but the tail is expired
-        (address o,,,,,,) = core.order(pid, 8);
+        (address o,,,,,,,) = core.order(pid, 8);
         assertEq(o, address(0), "expired tail evicted");
     }
 
@@ -152,5 +152,18 @@ contract AuditFindingsTest is Base {
         vm.prank(eve);
         core.bid(pid, uint96(ONE), 1e6, h2);
         assertGt(_pend(address(usdc), mallory), 0, "dust bid evicted by a larger bid at the same surplus");
+    }
+
+    // ------------------------------------------------------------ M-1: band and cadence are part of the pool id
+
+    /// A front-runner who creates the strike first cannot impose a band or cadence on others: another tier of the
+    /// same strike is a different pool with its own id.
+    function test_M1_tierIsPartOfId() public {
+        vm.prank(mallory);
+        bytes32 wide = _createKey(core, _keyT(K, Kind.American, E1, 1500, 2), _noOpts());
+        assertTrue(wide != pid);
+        assertEq(core.pool(pid).key.bandBps, 800);
+        assertEq(core.pool(pid).key.cadence, 0);
+        assertEq(core.pool(wide).batchInterval, 48 * BATCH);
     }
 }

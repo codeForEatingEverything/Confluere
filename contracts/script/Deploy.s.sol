@@ -7,8 +7,10 @@ import {IConfluere} from "../src/interfaces/IConfluere.sol";
 import {Router} from "../src/periphery/Router.sol";
 import {ERC6909WrapperFactory} from "../src/periphery/ERC6909Wrapper.sol";
 import {VaultFactory} from "../src/periphery/VaultFactory.sol";
+import {Vault} from "../src/periphery/Vault.sol";
 import {KeeperReceiver} from "../src/periphery/KeeperReceiver.sol";
 import {SeatRegistry} from "../src/periphery/SeatRegistry.sol";
+import {Specials} from "../src/periphery/Specials.sol";
 import {Guardian} from "../src/periphery/Guardian.sol";
 import {DeployConfig} from "./DeployConfig.sol";
 import {MockERC20} from "../src/mocks/MockERC20.sol";
@@ -59,6 +61,7 @@ contract Deploy is Script {
         address keeperReceiver;
         address seatRegistry;
         address guardian;
+        address specials;
     }
 
     function run() external returns (Confluere core) {
@@ -71,30 +74,64 @@ contract Deploy is Script {
         (, address deployer,) = vm.readCallers();
         Tokens memory t = mocks ? _mockTokens(salt) : Tokens(address(0), address(0), address(0));
         DeployConfig.Grad[7] memory grad = _grad(mocks, t);
-        // The core's treasury on each chain is that chain's SeatRegistry; precompute every row's so the core's init
-        // code (and address) is the same everywhere.
-        address[7] memory registries;
-        for (uint256 i; i < CHAIN_IDS.length; ++i) {
-            registries[i] = vm.computeCreate2Address(salt, keccak256(_registryInit(deployer, grad[i])));
+        Confluere.Config memory cfg;
+        SeatRegistry reg;
+        Guardian g;
+        address guardian;
+        Specials sp;
+        {
+            address[7] memory registries;
+            (registries, reg) = _registries(salt, deployer, grad);
+            g = _deployGuardian(salt, deployer);
+            guardian = address(g) != address(0) ? address(g) : vm.envAddress("GUARDIAN");
+            sp = _deploySpecials(salt, deployer);
+            cfg = DeployConfig.build(preset, registries, guardian, grad, address(sp));
         }
-        SeatRegistry reg = _deployRegistry(salt, deployer, grad);
-        for (uint256 i; i < CHAIN_IDS.length; ++i) {
-            if (CHAIN_IDS[i] == block.chainid) require(address(reg) == registries[i], "registry address mismatch");
-        }
-        Guardian g = _deployGuardian(salt, deployer);
-        address guardian = address(g) != address(0) ? address(g) : vm.envAddress("GUARDIAN");
-        Confluere.Config memory cfg = DeployConfig.build(preset, registries, guardian, grad);
         _preflight(cfg, preset);
         uint256 deployBlock;
         (core, deployBlock) = _deployCore(salt, cfg, reg, g);
+        _bindSpecials(sp, core);
         Periphery memory p = _periphery(IConfluere(address(core)), salt);
         p.seatRegistry = address(reg);
+        p.specials = address(sp);
         p.guardian = guardian;
         vm.stopBroadcast();
 
         _check(core, cfg);
         _write(core, cfg, preset, p, t, deployBlock);
         console2.log("Confluere", address(core));
+    }
+
+    /// @dev The core's treasury on each chain is that chain's SeatRegistry; precompute every row's so the core's init
+    /// code (and address) is the same everywhere, and deploy this chain's.
+    function _registries(bytes32 salt, address deployer, DeployConfig.Grad[7] memory grad)
+        internal
+        returns (address[7] memory registries, SeatRegistry reg)
+    {
+        for (uint256 i; i < CHAIN_IDS.length; ++i) {
+            registries[i] = vm.computeCreate2Address(salt, keccak256(_registryInit(deployer, grad[i])));
+        }
+        reg = _deployRegistry(salt, deployer, grad);
+        for (uint256 i; i < CHAIN_IDS.length; ++i) {
+            if (CHAIN_IDS[i] == block.chainid) require(address(reg) == registries[i], "registry address mismatch");
+        }
+    }
+
+    function _bindSpecials(Specials sp, Confluere core) internal {
+        if (address(sp.core()) == address(0)) sp.bind(IConfluere(address(core)));
+        require(address(sp.core()) == address(core), "specials bound to another core");
+    }
+
+    /// @dev Specials (ARCH 2.6.1): CREATE2 with (deployer, SPECIALS_MIN_FEE_BPS), the same address on every chain,
+    /// deployed before the core (whose immutable SPECIALS names it) and bound to it afterwards.
+    function _deploySpecials(bytes32 salt, address deployer) internal returns (Specials sp) {
+        bytes memory init = abi.encodePacked(
+            type(Specials).creationCode, abi.encode(deployer, uint16(vm.envOr("SPECIALS_MIN_FEE_BPS", uint256(0))))
+        );
+        sp = Specials(vm.computeCreate2Address(salt, keccak256(init)));
+        if (address(sp).code.length == 0) {
+            sp = new Specials{salt: salt}(deployer, uint16(vm.envOr("SPECIALS_MIN_FEE_BPS", uint256(0))));
+        }
     }
 
     /// @dev Guardian multisig (ARCH 8.2). Members are still open (blueprint 13 Q1); without GUARDIAN_MEMBERS nothing is
@@ -235,12 +272,12 @@ contract Deploy is Script {
         for (uint256 i; i < CHAIN_IDS.length; ++i) {
             if (mocks) {
                 g[i].quotes = new address[](2);
-                g[i].volumes = new uint256[](2);
+                g[i].fees = new uint256[](2);
                 g[i].minNotionals = new uint256[](2);
                 g[i].seatObligations = new uint256[](2);
-                (g[i].quotes[0], g[i].volumes[0], g[i].minNotionals[0], g[i].seatObligations[0]) =
+                (g[i].quotes[0], g[i].fees[0], g[i].minNotionals[0], g[i].seatObligations[0]) =
                 (t.native, 1e18, 1e17, 1e18);
-                (g[i].quotes[1], g[i].volumes[1], g[i].minNotionals[1], g[i].seatObligations[1]) =
+                (g[i].quotes[1], g[i].fees[1], g[i].minNotionals[1], g[i].seatObligations[1]) =
                 (t.usdc, 10e6, 1e6, 100e6);
             } else {
                 g[i] = _parseGrad(vm.envOr(string.concat("GRAD_", vm.toString(CHAIN_IDS[i])), string("")));
@@ -251,20 +288,20 @@ contract Deploy is Script {
     function _parseGrad(string memory spec) internal pure returns (DeployConfig.Grad memory g) {
         if (bytes(spec).length == 0) {
             g.quotes = new address[](0);
-            g.volumes = new uint256[](0);
+            g.fees = new uint256[](0);
             g.minNotionals = new uint256[](0);
             g.seatObligations = new uint256[](0);
             return g;
         }
         string[] memory items = vm.split(spec, ",");
         g.quotes = new address[](items.length);
-        g.volumes = new uint256[](items.length);
+        g.fees = new uint256[](items.length);
         g.minNotionals = new uint256[](items.length);
         g.seatObligations = new uint256[](items.length);
         for (uint256 i; i < items.length; ++i) {
             string[] memory kv = vm.split(items[i], ":");
             g.quotes[i] = vm.parseAddress(kv[0]);
-            g.volumes[i] = vm.parseUint(kv[1]);
+            g.fees[i] = vm.parseUint(kv[1]);
             g.minNotionals[i] = vm.parseUint(kv[2]);
             g.seatObligations[i] = vm.parseUint(kv[3]);
         }
@@ -276,8 +313,9 @@ contract Deploy is Script {
         if (p.router == address(0)) p.router = address(new Router{salt: salt}(core));
         p.wrapperFactory = _existing(salt, abi.encodePacked(type(ERC6909WrapperFactory).creationCode, arg));
         if (p.wrapperFactory == address(0)) p.wrapperFactory = address(new ERC6909WrapperFactory{salt: salt}(core));
-        p.vaultFactory = _existing(salt, abi.encodePacked(type(VaultFactory).creationCode, arg));
-        if (p.vaultFactory == address(0)) p.vaultFactory = address(new VaultFactory{salt: salt}(core));
+        bytes32 vaultCode = keccak256(type(Vault).creationCode);
+        p.vaultFactory = _existing(salt, abi.encodePacked(type(VaultFactory).creationCode, abi.encode(core, vaultCode)));
+        if (p.vaultFactory == address(0)) p.vaultFactory = address(new VaultFactory{salt: salt}(core, vaultCode));
         p.keeperReceiver =
             _existing(salt, abi.encodePacked(type(KeeperReceiver).creationCode, abi.encode(core, uint256(16))));
         if (p.keeperReceiver == address(0)) p.keeperReceiver = address(new KeeperReceiver{salt: salt}(core, 16));
@@ -383,6 +421,7 @@ contract Deploy is Script {
         vm.serializeAddress(k, "keeperReceiver", p.keeperReceiver);
         vm.serializeAddress(k, "seatRegistry", p.seatRegistry);
         vm.serializeAddress(k, "guardian", p.guardian);
+        vm.serializeAddress(k, "specials", p.specials);
         string memory json = vm.serializeAddress(k, "confluere", address(core));
         vm.writeJson(json, DeployConfig.deploymentsFile(vm));
     }

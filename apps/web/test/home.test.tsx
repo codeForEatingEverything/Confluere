@@ -103,8 +103,8 @@ describe("home: borrow", () => {
     expect(btn().textContent).toBe("Approve WETH");
     DS.allowance = undefined;
     pay("2");
-    expect(btn().textContent).toBe("Borrow 5,900.00 USDC");
-    expect((screen.getByTestId("receive-output") as HTMLInputElement).value).toBe("5,900.00");
+    expect(btn().textContent).toBe("Borrow 5,884.12 USDC"); // 5,900 − 0.015% trade fee − 5% of the interest
+    expect((screen.getByTestId("receive-output") as HTMLInputElement).value).toBe("5,884.12");
     expect(screen.getByTestId("borrow-terms").textContent).toMatch(/Repay6,200\.00 USDC/);
   });
 

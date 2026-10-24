@@ -15,13 +15,15 @@ export function canRepay(p: PoolRow, now: number, block: bigint): boolean {
   return windowOpen(p, now, block) || (p.kind === Kind.American && p.status === Status.Open && now < p.expiry);
 }
 
-export type Phase = "trading" | "awaiting" | "window" | "closing" | "closed" | "none";
+export type Phase = "trading" | "awaiting" | "window" | "closing" | "selling" | "closed" | "none";
 
 /** Lifecycle phase as the UI names it (FRONTEND_DESIGN §6.0 status language). */
 export function phase(p: PoolRow, now: number): Phase {
   if (p.status === Status.Open) return now < p.expiry ? "trading" : "awaiting";
   if (p.status === Status.Window) return "window";
-  if (p.status === Status.Closing) return "closing";
+  // v0.8 decision B: an auto-sell pool past its window is selling its defaulted asset in the next maturity
+  if (p.status === Status.Selling) return "selling";
+  if (p.status === Status.Closing) return p.autoSell ? "selling" : "closing";
   if (p.status === Status.Closed) return "closed";
   return "none";
 }
@@ -31,6 +33,7 @@ export const PHASE_LABEL: Record<Phase, string> = {
   awaiting: "Expired · awaiting maturity",
   window: "Repayment window",
   closing: "Closing",
+  selling: "Selling defaulted collateral · claims open later",
   closed: "Closed",
   none: "Unknown",
 };

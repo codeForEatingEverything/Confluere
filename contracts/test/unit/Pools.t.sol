@@ -38,32 +38,40 @@ contract PoolsTest is Base {
     }
 
     function test_createPool_strikeGrid() public {
-        _create(3100e6, Kind.American, E1); // two significant digits
+        _create(K_HI, Kind.American, E1); // n = 808
         vm.expectRevert(IConfluere.InvalidParams.selector);
-        _create(3150e6, Kind.American, E1); // three
-        _create(98e16, Kind.European, E1); // pegged 0.98 in an 18-decimal quote
+        _create(3000e6, Kind.American, E1); // between 804 and 805: off the grid
     }
 
-    function test_createPool_rejectsFeeAndBandOutsideWhitelist() public {
+    function test_createPool_rejectsBadBandOrCadence() public {
         vm.expectRevert(IConfluere.InvalidParams.selector);
-        core.createPool(_key(K, Kind.American, E1), 500, 800);
+        _createKey(core, _keyT(K, Kind.American, E1, 100, 0), _noOpts());
         vm.expectRevert(IConfluere.InvalidParams.selector);
-        core.createPool(_key(K, Kind.American, E1), 1000, 100);
+        _createKey(core, _keyT(K, Kind.American, E1, 800, 3), _noOpts());
+    }
+
+    function test_sameStrike_differentBand_coexist() public {
+        bytes32 a = _createKey(core, _keyT(K, Kind.American, E1, 800, 0), _noOpts());
+        bytes32 b = _createKey(core, _keyT(K, Kind.American, E1, 1500, 0), _noOpts());
+        bytes32 c = _createKey(core, _keyT(K, Kind.American, E1, 800, 1), _noOpts());
+        assertTrue(a != b && a != c && b != c);
+        assertEq(core.pool(b).key.bandBps, 1500);
+        assertEq(core.pool(c).batchInterval, 12 * BATCH);
     }
 
     function test_createPool_rejectsFeeOnTransfer() public {
         FeeOnTransferERC20 fot = new FeeOnTransferERC20();
         fot.mint(address(this), ONE);
         fot.approve(address(core), type(uint256).max);
-        PoolKey memory key = PoolKey(address(fot), address(usdc), E1, K, Kind.American);
+        PoolKey memory key = PoolKey(address(fot), address(usdc), E1, K, Kind.American, 800, 0);
         vm.expectRevert(IConfluere.BadToken.selector);
-        core.createPool(key, 1000, 800);
+        _createKey(core, key, _noOpts());
     }
 
     function test_createPool_rejectsSameToken() public {
-        PoolKey memory key = PoolKey(address(usdc), address(usdc), E1, K, Kind.American);
+        PoolKey memory key = PoolKey(address(usdc), address(usdc), E1, K, Kind.American, 800, 0);
         vm.expectRevert(IConfluere.BadToken.selector);
-        core.createPool(key, 1000, 800);
+        _createKey(core, key, _noOpts());
     }
 
     function test_placeOrder_escrows() public {
@@ -73,7 +81,9 @@ contract PoolsTest is Base {
         assertEq(weth.balanceOf(alice), w0 - ONE);
         uint256 u0 = usdc.balanceOf(bob);
         _buy(bob, pid, ONE, 2900e6);
-        assertEq(u0 - usdc.balanceOf(bob), 2900e6 + 10, "limit cost plus 1 wei per ttl batch");
+        assertEq(
+            u0 - usdc.balanceOf(bob), 2900e6 + 435_000 + 20, "limit cost, its 0.015% trade fee, 2 wei per ttl batch"
+        );
     }
 
     function test_placeOrder_validation() public {
@@ -96,7 +106,7 @@ contract PoolsTest is Base {
         p.owner = dave;
         vm.prank(alice);
         uint64 id = core.placeOrder(pid, p);
-        (address owner,,,,,,) = core.order(pid, id);
+        (address owner,,,,,,,) = core.order(pid, id);
         assertEq(owner, dave);
         vm.prank(dave);
         core.cancelOrder(pid, id);
@@ -117,7 +127,7 @@ contract PoolsTest is Base {
         uint64 d = core.placeOrder(pid, _params(SELL, ONE, 2950e6, 0, 1, staleHint));
         (uint64 head,) = core.bookHead(pid, SELL);
         assertEq(head, a);
-        (,,,,,, uint64 nextOfD) = core.order(pid, d);
+        (,,,,,,, uint64 nextOfD) = core.order(pid, d);
         assertEq(nextOfD, b);
     }
 
@@ -165,7 +175,7 @@ contract PoolsTest is Base {
         _sell(dave, pid, ONE, 2050e6);
         (, uint32 count) = core.bookHead(pid, SELL);
         assertEq(count, 8);
-        (address owner,,,,,,) = core.order(pid, worst);
+        (address owner,,,,,,,) = core.order(pid, worst);
         assertEq(owner, address(0));
         assertEq(_pend(address(weth), alice), ONE);
     }
@@ -192,7 +202,7 @@ contract PoolsTest is Base {
         vm.prank(bob);
         core.cancelOrder(pid, b);
         assertEq(_pend(address(weth), alice), ONE);
-        assertEq(_pend(address(usdc), bob), 2800e6 + 10);
+        assertEq(_pend(address(usdc), bob), 2800e6 + 420_000 + 20);
         uint256 before = weth.balanceOf(alice);
         vm.prank(alice);
         core.withdraw(address(weth), alice);
@@ -229,7 +239,7 @@ contract PoolsTest is Base {
         (uint64 cur,) = core.bookHead(pid, side);
         for (uint256 i; i < ids.length; ++i) {
             assertEq(cur, ids[i], "book order");
-            (,,,,,, cur) = core.order(pid, cur);
+            (,,,,,,, cur) = core.order(pid, cur);
         }
     }
 }

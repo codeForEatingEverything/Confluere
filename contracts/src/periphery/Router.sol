@@ -6,6 +6,7 @@ import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol
 import {IConfluere} from "../interfaces/IConfluere.sol";
 import {PoolKeyLib} from "../libraries/PoolKey.sol";
 import {SELL, BUY, NC_SELL, NC_BUY} from "../libraries/OrderSet.sol";
+import {Settlement} from "../libraries/Settlement.sol";
 import {Clearing} from "../libraries/Clearing.sol";
 
 interface IConfluere6909 {
@@ -43,14 +44,18 @@ contract Router {
     }
 
     /// @notice Repay on behalf of the caller: moves the caller's R here, pays K from the caller, returns the asset.
-    function repay(bytes32 poolId, uint96 units) external {
+    /// Units lent through Specials and not returned by the cutoff are paid in forfeited margin instead (decision A):
+    /// the core credits it to this router's pending, which holds nothing else between calls, so it is withdrawn
+    /// straight to the caller.
+    function repay(bytes32 poolId, uint96 units) external returns (uint256 assetOut, uint256 marginOut) {
         IConfluere.PoolView memory v = core.pool(poolId);
         uint256 pay = Clearing.quoteUp(units, v.key.strike, 10 ** uint256(v.assetDecimals));
         IConfluere6909(address(core)).transferFrom(msg.sender, address(this), poolId.rId(), units);
         IERC20(v.key.quote).safeTransferFrom(msg.sender, address(this), pay);
         IERC20(v.key.quote).forceApprove(address(core), pay);
-        core.repay(poolId, units);
-        IERC20(v.key.asset).safeTransfer(msg.sender, units);
+        (assetOut, marginOut) = core.repay(poolId, units);
+        if (assetOut != 0) IERC20(v.key.asset).safeTransfer(msg.sender, assetOut);
+        if (marginOut != 0) core.withdraw(v.key.quote, msg.sender);
     }
 
     /// @notice Claim several closed pools at once and forward everything to the caller.
@@ -75,6 +80,6 @@ contract Router {
     {
         if (p.side == SELL || p.side == NC_SELL) return (v.key.asset, p.units);
         if (p.side == NC_BUY) return (v.key.quote, p.budget);
-        return (v.key.quote, Clearing.quoteUp(p.units, p.limit, 10 ** uint256(v.assetDecimals)) + p.ttl);
+        return (v.key.quote, Settlement.buyEscrow(p.units, p.limit, 10 ** uint256(v.assetDecimals), p.ttl));
     }
 }

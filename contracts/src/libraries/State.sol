@@ -7,7 +7,7 @@ import {IERC6909} from "@openzeppelin/contracts/interfaces/IERC6909.sol";
 
 import {IConfluere} from "../interfaces/IConfluere.sol";
 import {PoolKey, PoolKeyLib, Status} from "./PoolKey.sol";
-import {Order, Book, OrderSet, SELL, NC_SELL, BID, FLAG_ROLLOVER} from "./OrderSet.sol";
+import {Order, Book, OrderSet, SELL, NC_SELL, BID, FLAG_ROLLOVER, FLAG_AUTOSELL} from "./OrderSet.sol";
 
 /// @notice Per-pool state. All funds stay in the singleton; these are the pool's shares of them.
 struct PoolState {
@@ -15,25 +15,36 @@ struct PoolState {
     bytes32 marketId;
     Status status;
     uint8 assetDecimals;
-    uint16 feeBps;
-    uint16 bandBps;
+    int16 strikeIndex; // n on the 1% log grid: strike == Grid.strikeAt(n, quoteDecimals)
+    bool autoSell; // pool option: at close, defaulted asset is sold into the next expiry's pool of the same tier
     uint8 bandFailures;
     uint32 settleCount;
     uint64 lastSettledBatch;
     uint64 windowEnd;
     uint64 pausedUntil;
+    uint64 pausedBlocks; // cumulative guardian pause granted to this pool, capped at MAX_PAUSE_BLOCKS
     uint96 lastClearingPrice;
     uint96 bandBase;
-    uint8 cadence; // batch interval = base interval * {1, 12, 48}[cadence]
     uint96 minFill; // minimum fill: smallest competitive volume (asset units) a batch may trade
     uint96 firstLo; // first-auction price bounds; firstHi = 0 means no upper bound
     uint96 firstHi;
     uint256 quoteBal; // quote owned by C holders
     uint256 assetBal; // asset owned by the pool (backs outstanding R, then C after close)
     uint256 surplusBal; // abandonment-auction surplus owed to R holders
-    uint256 sumPU; // sum(price * units) over fills, for vwap
-    uint256 sumUnits;
+    uint256 feeEscrow; // spread share withheld from sellers at clearing, split at close by the repaid fraction
+    uint256 filledUnits; // units ever filled (= C minted)
+    uint256 repaidUnits; // units whose K was paid in full: repay, rollover, abandonment-auction fill
     uint256 closeRemaining; // unrepaid R units still open to bids during Closing
+    // Specials lending (European pools only, ARCH 2.6.1). The asset part of assetBal that is physically here is
+    // assetBal - lentUnits - shortUnits.
+    uint128 lentUnits; // lent out through Specials, returnable until the cutoff
+    uint128 lentMargin; // their margin (quote), escrowed here from the moment of lending
+    uint128 shortUnits; // lent units not returned by the cutoff, recorded lazily at the first touch after it
+    uint128 shortMargin; // the forfeited margin: pays repayers who paid K for units that are not here
+    // autoSell (decision B): while Selling, autoSellUnits of assetBal rest as a sell order in the next expiry's pool
+    bytes32 autoSellPool;
+    uint64 autoSellOrder;
+    uint96 autoSellUnits;
 }
 
 /// @notice The whole storage of the singleton. Logic libraries receive it by storage reference.
@@ -41,14 +52,15 @@ struct CoreState {
     mapping(bytes32 => PoolState) pools;
     mapping(bytes32 => mapping(uint8 => Book)) books;
     mapping(bytes32 => mapping(uint64 => Order)) orders;
-    mapping(bytes32 => mapping(uint64 => bytes32)) rolloverOld;
+    mapping(bytes32 => mapping(uint64 => bytes32)) linkedPool; // order in a new pool -> its source pool (rollover)
     mapping(bytes32 => mapping(uint64 => IConfluere.MarketStats)) stats;
+    mapping(bytes32 => mapping(uint64 => mapping(uint256 => uint256))) tierVolume; // market -> expiry -> tier -> quote
     mapping(address => mapping(address => uint256)) pending;
     mapping(address => mapping(bytes32 => uint256)) lockedR;
     mapping(bytes32 => bool) graduated;
-    mapping(address => uint256) graduationVolume;
+    mapping(address => uint256) graduationFee; // per quote token: treasury fees an expiry must earn to count
     mapping(address => uint256) minNotional; // per quote token: smallest order, valued at K (anti-dust)
-    mapping(bytes32 => uint256) marketFees; // cumulative spread share per market, in its quote token (seat split)
+    mapping(bytes32 => uint256) marketFees; // cumulative treasury fees per market (trade fees + spread share)
     mapping(address => uint256) flashFees; // cumulative flash-loan fees per token (not tied to a market)
     mapping(uint64 => uint64) windowEnd; // per expiry: one repayment window for every pool, set by the first mature()
     // ERC-6909 ledger
@@ -59,14 +71,66 @@ struct CoreState {
     uint64 nextOrderId;
 }
 
-/// @notice Deploy-time constants the logic libraries need (immutables live in the core contract).
+/// @notice Deploy-time constants the logic libraries need (immutables live in the core contract), packed into three
+/// words so every forwarding call in the core pushes three constants instead of twelve (core bytecode size).
+/// a: treasury | maxOrdersPerSide << 160 | maxBids << 192 | autoSellDiscountBps << 224 | autoSellTtl << 240
+/// b: windowBlocks | anchor << 64 | batchInterval << 128 | period << 192
+/// c: specials | maxPauseBlocks << 160 | lendCutoff << 192
 struct Params {
-    address treasury;
-    uint32 maxOrdersPerSide;
-    uint32 maxBids;
-    uint64 windowBlocks;
-    uint64 anchor; // grid anchor
-    uint64 batchInterval; // base batch interval
+    uint256 a;
+    uint256 b;
+    uint256 c;
+}
+
+/// @notice Accessors for the packed Params.
+library ParamsLib {
+    function treasury(Params memory p) internal pure returns (address) {
+        return address(uint160(p.a));
+    }
+
+    function maxOrdersPerSide(Params memory p) internal pure returns (uint32) {
+        return uint32(p.a >> 160);
+    }
+
+    function maxBids(Params memory p) internal pure returns (uint32) {
+        return uint32(p.a >> 192);
+    }
+
+    function autoSellDiscountBps(Params memory p) internal pure returns (uint16) {
+        return uint16(p.a >> 224);
+    }
+
+    function autoSellTtl(Params memory p) internal pure returns (uint16) {
+        return uint16(p.a >> 240);
+    }
+
+    function windowBlocks(Params memory p) internal pure returns (uint64) {
+        return uint64(p.b);
+    }
+
+    function anchor(Params memory p) internal pure returns (uint64) {
+        return uint64(p.b >> 64);
+    }
+
+    function batchInterval(Params memory p) internal pure returns (uint64) {
+        return uint64(p.b >> 128);
+    }
+
+    function period(Params memory p) internal pure returns (uint64) {
+        return uint64(p.b >> 192);
+    }
+
+    function specials(Params memory p) internal pure returns (address) {
+        return address(uint160(p.c));
+    }
+
+    function maxPauseBlocks(Params memory p) internal pure returns (uint32) {
+        return uint32(p.c >> 160);
+    }
+
+    function lendCutoff(Params memory p) internal pure returns (uint32) {
+        return uint32(p.c >> 192);
+    }
 }
 
 /// @notice Helpers shared by the core and every logic library. Internal, so each library embeds its own copy.
@@ -93,7 +157,7 @@ library CoreLib {
 
     /// @notice This pool's batch interval: the base interval times 1, 12 or 48 by cadence.
     function interval(PoolState storage ps, uint64 base) internal view returns (uint256) {
-        uint8 c = ps.cadence;
+        uint8 c = ps.key.cadence;
         return uint256(base) * (c == 0 ? 1 : c == 1 ? 12 : 48);
     }
 
@@ -101,8 +165,11 @@ library CoreLib {
         return 10 ** uint256(ps.assetDecimals);
     }
 
-    function vwap(PoolState storage ps) internal view returns (uint256) {
-        return ps.sumUnits == 0 ? 0 : ps.sumPU / ps.sumUnits;
+    /// @notice Counts treasury fees toward the market's graduation at this expiry. Saturating: never blocks.
+    function addFees(CoreState storage s, PoolState storage ps, uint256 amount) internal {
+        IConfluere.MarketStats storage st = s.stats[ps.marketId][ps.key.expiry];
+        uint256 f = uint256(st.fees) + amount;
+        st.fees = f > type(uint128).max ? type(uint128).max : uint128(f);
     }
 
     function newOrderId(CoreState storage s) internal returns (uint64 id) {
@@ -134,11 +201,24 @@ library CoreLib {
     function insert(CoreState storage s, Params memory p, bytes32 poolId, PoolState storage ps, uint64 id, uint64 hint)
         internal
     {
+        if (!tryInsert(s, p, poolId, ps, id, hint)) revert IConfluere.BookFull();
+    }
+
+    /// @notice Inserts an order whose struct is already written; false (nothing changed) if its book is full and the
+    /// order cannot displace anything.
+    function tryInsert(
+        CoreState storage s,
+        Params memory p,
+        bytes32 poolId,
+        PoolState storage ps,
+        uint64 id,
+        uint64 hint
+    ) internal returns (bool) {
         mapping(uint64 => Order) storage os = s.orders[poolId];
         Order storage o = os[id];
         uint8 side = o.side;
         Book storage b = s.books[poolId][side];
-        uint32 max = side == BID ? p.maxBids : p.maxOrdersPerSide;
+        uint32 max = side == BID ? ParamsLib.maxBids(p) : ParamsLib.maxOrdersPerSide(p);
         if (OrderSet.sorted(side)) {
             if (b.count >= max) {
                 // Full book: evict the worst order if it has expired, or if the new order beats it on price, or
@@ -146,7 +226,7 @@ library CoreLib {
                 uint64 worst = b.tail;
                 Order storage w = os[worst];
                 bool beats = w.limit == o.limit ? o.units > w.units : !OrderSet.goesAfter(side, w.limit, o.limit);
-                if (w.deadline > ps.settleCount && !beats) revert IConfluere.BookFull();
+                if (w.deadline > ps.settleCount && !beats) return false;
                 if (hint == worst) hint = w.prev;
                 removeWithRefund(s, poolId, ps, worst, RM_EVICTED);
             }
@@ -155,6 +235,7 @@ library CoreLib {
             if (b.count >= max) _evictSmallest(s, poolId, ps, b, os, o);
             b.pushBack(os, id);
         }
+        return true;
     }
 
     /// @dev Full non-competitive queue: drop an expired entry if any, else the smallest one if the new order is
@@ -202,9 +283,12 @@ library CoreLib {
         address owner = o.owner;
         uint8 side = o.side;
         if (side == SELL || side == NC_SELL) {
-            if (o.flags & FLAG_ROLLOVER != 0) {
-                s.lockedR[owner][s.rolloverOld[poolId][id]] -= o.units;
-                delete s.rolloverOld[poolId][id];
+            if (o.flags & FLAG_AUTOSELL != 0) {
+                _endAutoSell(s, s.linkedPool[poolId][id]);
+                delete s.linkedPool[poolId][id];
+            } else if (o.flags & FLAG_ROLLOVER != 0) {
+                s.lockedR[owner][s.linkedPool[poolId][id]] -= o.units;
+                delete s.linkedPool[poolId][id];
                 if (o.escrow != 0) s.pending[ps.key.quote][owner] += o.escrow;
             } else if (o.units != 0) {
                 s.pending[ps.key.asset][owner] += o.units;
@@ -216,15 +300,34 @@ library CoreLib {
         emit IConfluere.OrderRemoved(poolId, id, reason);
     }
 
-    /// @notice Whether an order may trade in the settlement numbered `sc`.
-    function live(CoreState storage s, bytes32 poolId, uint64 id, Order storage o, uint32 sc)
+    /// @dev An autoSell order left its book (filled, expired, evicted or purged): the source pool closes and C holders
+    /// claim the proceeds and any unsold remainder in kind.
+    function _endAutoSell(CoreState storage s, bytes32 src) private {
+        PoolState storage op = s.pools[src];
+        uint256 left = op.autoSellUnits;
+        op.autoSellUnits = 0;
+        op.autoSellOrder = 0;
+        op.autoSellPool = bytes32(0);
+        op.status = Status.Closed;
+        emit IConfluere.AutoSellEnded(src, left);
+        emit IConfluere.WindowClosed(src, op.quoteBal, op.assetBal, op.surplusBal);
+    }
+
+    /// @notice Whether an order may trade in the settlement numbered `sc`, whose batch is followed by a boundary at
+    /// `nextBoundary`. A rollover trades while the old pool's window runs, and also in the new pool's last batch
+    /// before the old pool expires (blueprint 3.7 #5): the old pool's K is then paid in full one batch early.
+    function live(CoreState storage s, bytes32 poolId, uint64 id, Order storage o, uint32 sc, uint256 nextBoundary)
         internal
         view
         returns (bool)
     {
         if (o.deadline <= sc) return false;
         if (o.flags & FLAG_ROLLOVER == 0) return true;
-        return windowOpen(s, s.pools[s.rolloverOld[poolId][id]]);
+        PoolState storage op = s.pools[s.linkedPool[poolId][id]];
+        // the old pool must hold every unit it backs: no rollover while lent units are out or recorded short
+        if (op.lentUnits != 0 || op.shortUnits != 0) return false;
+        return windowOpen(s, op)
+            || (op.status == Status.Open && block.timestamp < op.key.expiry && nextBoundary >= op.key.expiry);
     }
 
     /// @notice Whether the pool's repayment window is running. Windows are aligned per expiry: after expiry a pool

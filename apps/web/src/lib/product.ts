@@ -9,7 +9,7 @@
  * Protocol names stay in code only: strike = buy-back price per 1 whole collateral, lastClearingPrice = last traded
  * price per 1 whole collateral (what a borrower received), C = lender units, R = borrower's buy-back right.
  */
-import { Status, haircut, impliedApr, quoteDown, repayAmount, scaleOf } from "@confluere/sdk";
+import { Status, borrowerNetPerUnit, haircut, impliedApr, lenderCostPerUnit, ncUnits, quoteDown, repayAmount, scaleOf, sellerNet } from "@confluere/sdk";
 import type { Address, Hex } from "viem";
 import type { PoolRow, VaultRow } from "./data";
 import type { Position } from "./position";
@@ -88,9 +88,9 @@ export function offerOf(p: PoolRow, o: { now: number; block: bigint; ref?: numbe
     strike: p.strike,
     price,
     priced,
-    receivePerUnit: price,
+    receivePerUnit: priced ? borrowerNetPerUnit(price, p.strike, scale) : 0n, // after the 0.015% trade fee and 5% spread share
     repayPerUnit: repayAmount(scale, p.strike, scale),
-    apr: priced ? impliedApr(price, p.strike, p.expiry - o.now) : 0,
+    apr: priced ? impliedApr(lenderCostPerUnit(price), p.strike, p.expiry - o.now) : 0, // lender APR net of the trade fee
     ref,
     haircutVsRef: ref && priced && qd !== undefined ? 1 - toFloat(price, qd) / ref : undefined,
     repayVsRef: ref && qd !== undefined ? toFloat(p.strike, qd) / ref : undefined,
@@ -171,23 +171,29 @@ export function pickLendOffer(terms: Term[], o: { expiry?: number; goal: "apr" |
 
 // ───────────────────────────── amounts ─────────────────────────────
 
-/** Quote a borrower receives for `units` of collateral at the offer's last price (rounded down). */
-export const borrowReceive = (o: Pick<Offer, "price" | "pool">, units: bigint) => quoteDown(units, o.price, scaleOf(o.pool.assetDecimals));
+/** Quote a borrower receives for `units` of collateral at the offer's last price, net of the trade fee and spread share. */
+export const borrowReceive = (o: Pick<Offer, "price" | "pool">, units: bigint) =>
+  o.price > 0n ? sellerNet(units, o.price, o.pool.strike, scaleOf(o.pool.assetDecimals)) : 0n;
 
 /** Quote to repay for `units` (buy-back price, rounded up like the contract). */
 export const borrowRepay = (o: Pick<Offer, "strike" | "pool">, units: bigint) => repayAmount(units, o.strike, scaleOf(o.pool.assetDecimals));
 
-/** Collateral needed to receive at least `quote` at the last price (rounded up); 0 when unpriced. */
+/** Collateral needed to receive at least `quote` (net of fees) at the last price (rounded up); 0 when unpriced. */
 export function unitsForQuote(o: Pick<Offer, "price" | "pool">, quote: bigint): bigint {
   if (o.price <= 0n || quote <= 0n) return 0n;
   const s = scaleOf(o.pool.assetDecimals);
-  return (quote * s + o.price - 1n) / o.price;
+  const per = borrowerNetPerUnit(o.price, o.pool.strike, s);
+  if (per <= 0n) return 0n;
+  let u = (quote * s + per - 1n) / per;
+  // per-unit rounding can leave the net a few wei short: step up until the contract's own split covers `quote`
+  for (let k = 0; k < 4 && borrowReceive(o, u) < quote; k++) u += 1n + u / 1_000_000_000n;
+  return u;
 }
 
-/** Lender units a quote budget buys at the last price (rounded down); 0 when unpriced. */
+/** Lender units an all-in quote budget (cost + 0.015% trade fee) buys at the last price; 0 when unpriced. */
 export function lendUnits(o: Pick<Offer, "price" | "pool">, budget: bigint): bigint {
   if (o.price <= 0n) return 0n;
-  return (budget * scaleOf(o.pool.assetDecimals)) / o.price;
+  return ncUnits(budget, o.price, scaleOf(o.pool.assetDecimals));
 }
 
 /** What `units` lender units pay if repaid (buy-back price, rounded down as claims are). */

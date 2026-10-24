@@ -140,7 +140,7 @@ export const fmtLocal = (ts: number) =>
 /** Legacy name kept for older call sites. */
 export const dateTime = fmtLocal;
 
-export const STATUS_LABEL = ["—", "Open", "Repayment window", "Closing", "Closed"];
+export const STATUS_LABEL = ["—", "Open", "Repayment window", "Closing", "Selling defaulted collateral", "Closed"]; // indexed by Status (v0.8: Selling = 4, Closed = 5)
 export const KIND_LABEL = ["Repay any time", "Repay at maturity only"];
 export const kindSlug = (k: number) => (k === 0 ? "american" : "european");
 

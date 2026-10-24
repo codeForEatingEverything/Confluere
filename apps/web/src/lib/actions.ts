@@ -169,7 +169,7 @@ export function rolloverPlan(i: Omit<RolloverInput, "quote">, windowBlocks: numb
   const minPrice = i.minPrice ?? borrowFloor(i.to, i.slippageBps);
   const tries = rolloverTries(windowBlocks, i.spb, i.to.batchInterval);
   const { ttl, capped } = rolloverTtl({ now: i.now, fromExpiry: i.from.expiry, targetInterval: i.to.batchInterval, tries });
-  const maxTopUp = minPrice > 0n ? rolloverMaxTopUp(i.from, i.units, minPrice, ttl) : 0n;
+  const maxTopUp = minPrice > 0n ? rolloverMaxTopUp(i.from, i.units, minPrice, ttl, i.to) : 0n;
   return { minPrice, maxTopUp, ttl, capped, tries };
 }
 

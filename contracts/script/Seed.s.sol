@@ -128,7 +128,7 @@ contract Seed is Script {
     function _hasSell(Confluere core, bytes32 pid, address me) internal view returns (bool) {
         (uint64 id,) = core.bookHead(pid, SELL);
         while (id != 0) {
-            (address owner,,,,,, uint64 next) = core.order(pid, id);
+            (address owner,,,,,,, uint64 next) = core.order(pid, id);
             if (owner == me) return true;
             id = next;
         }

@@ -10,6 +10,7 @@ import {IConfluere} from "../interfaces/IConfluere.sol";
 import {PoolKeyLib, Kind, Status} from "../libraries/PoolKey.sol";
 import {GridConfig} from "../libraries/Grid.sol";
 import {SELL, BUY} from "../libraries/OrderSet.sol";
+import {Settlement} from "../libraries/Settlement.sol";
 import {Clearing} from "../libraries/Clearing.sol";
 
 /// @title SeatRegistry
@@ -53,7 +54,10 @@ contract SeatRegistry is ReentrancyGuardTransient {
     IConfluere public core;
     address internal immutable _deployer;
     address public immutable protocol;
+    /// Seat share of the market's spread share after graduation (blueprint 9: 35%).
     uint16 public immutable seatShareBps;
+    /// Seat share before graduation (blueprint 9: 70%), when the seat holder is carrying the market.
+    uint16 public constant SHARE_BEFORE_BPS = 7000;
     uint16 public immutable taxBps;
 
     mapping(address => uint256) public obligation; // per quote token, 0 = no seats for that quote
@@ -189,7 +193,9 @@ contract SeatRegistry is ReentrancyGuardTransient {
         uint256 last = v.lastClearingPrice;
         uint256 valuedAt = v.key.strike;
         if (last != 0) {
-            if (p.side == BUY ? p.limit < last * (BPS - v.bandBps) / BPS : p.limit > last * (BPS + v.bandBps) / BPS) {
+            if (p.side == BUY
+                    ? p.limit < last * (BPS - v.key.bandBps) / BPS
+                    : p.limit > last * (BPS + v.key.bandBps) / BPS) {
                 revert InvalidParams();
             }
         } else if (p.side == BUY && p.limit < valuedAt) {
@@ -199,7 +205,7 @@ contract SeatRegistry is ReentrancyGuardTransient {
 
         (address token, uint256 amount) = p.side == SELL
             ? (v.key.asset, uint256(p.units))
-            : (v.key.quote, Clearing.quoteUp(p.units, p.limit, scale) + p.ttl);
+            : (v.key.quote, Settlement.buyEscrow(p.units, p.limit, scale, p.ttl));
         IERC20(token).safeTransferFrom(msg.sender, address(this), amount);
         IERC20(token).forceApprove(address(core), amount);
         IConfluere.OrderParams memory o = p;
@@ -306,7 +312,12 @@ contract SeatRegistry is ReentrancyGuardTransient {
         emit TaxPaid(m, owed);
     }
 
-    /// @dev New spread share since the last split: `seatShareBps` to the holder at this moment, the rest to the
+    /// @notice The seat's share of market `m`'s fees: 70% before graduation, `seatShareBps` (35%) after.
+    function shareBps(bytes32 m) public view returns (uint256) {
+        return core.graduated(m) ? seatShareBps : SHARE_BEFORE_BPS;
+    }
+
+    /// @dev New spread share since the last split: `shareBps(m)` to the holder at this moment, the rest to the
     /// protocol. Run before any change of holder so each holder is paid for its own tenure.
     function _split(bytes32 m, address quote_) internal {
         uint256 total = core.marketFees(m);
@@ -314,7 +325,7 @@ contract SeatRegistry is ReentrancyGuardTransient {
         if (fresh == 0) return;
         feesSplit[m] = total;
         address holder = seats[m].holder;
-        uint256 toSeat = holder == address(0) ? 0 : fresh * seatShareBps / BPS;
+        uint256 toSeat = holder == address(0) ? 0 : fresh * shareBps(m) / BPS;
         if (toSeat != 0) claimable[quote_][holder] += toSeat;
         claimable[quote_][protocol] += fresh - toSeat;
         emit FeesSplit(m, toSeat, fresh - toSeat);

@@ -42,7 +42,6 @@ contract Confluere is IConfluere, IERC6909TokenSupply, IERC3156FlashLender, Reen
     uint64 internal immutable GRID_PERIOD;
     uint64 internal immutable GRID_BATCH;
     uint32 internal immutable GRID_MAX_EXPIRIES;
-    uint8 internal immutable GRID_SIG_DIGITS;
 
     uint64 public immutable WINDOW_BLOCKS;
     uint64 public immutable MAX_PAUSE_BLOCKS;
@@ -50,6 +49,15 @@ contract Confluere is IConfluere, IERC6909TokenSupply, IERC3156FlashLender, Reen
     uint32 public immutable MAX_BIDS;
     address public immutable treasury;
     address public immutable guardian;
+    uint16 public immutable AUTOSELL_DISCOUNT_BPS;
+    uint16 public immutable AUTOSELL_TTL;
+    uint64 public immutable LEND_CUTOFF;
+    address public immutable SPECIALS;
+
+    // Params for the logic libraries, packed (see Params in State.sol)
+    uint256 internal immutable PARAMS_A;
+    uint256 internal immutable PARAMS_B;
+    uint256 internal immutable PARAMS_C;
 
     CoreState internal s;
 
@@ -62,7 +70,7 @@ contract Confluere is IConfluere, IERC6909TokenSupply, IERC3156FlashLender, Reen
         address treasury;
         address guardian;
         address[] graduationQuotes;
-        uint256[] graduationVolumes;
+        uint256[] graduationFees;
         address[] minNotionalQuotes; // anti-dust: smallest order per quote token, valued at K
         uint256[] minNotionals;
     }
@@ -71,6 +79,10 @@ contract Confluere is IConfluere, IERC6909TokenSupply, IERC3156FlashLender, Reen
         GridConfig grid;
         uint32 maxOrdersPerSide;
         uint32 maxBids;
+        uint16 autoSellDiscountBps; // autoSell limit = K x this / 10_000
+        uint16 autoSellTtl; // settlements an autoSell order may take part in
+        uint64 lendCutoff; // lending ends at expiry - lendCutoff (mainnet 12 h: Thursday 20:00 UTC)
+        address specials; // the Specials periphery, the only caller of the lending entry points
         ChainParams[] chains;
     }
 
@@ -78,7 +90,11 @@ contract Confluere is IConfluere, IERC6909TokenSupply, IERC3156FlashLender, Reen
 
     constructor(Config memory c) {
         Grid.validate(c.grid);
-        if (c.maxOrdersPerSide == 0 || c.maxBids == 0) revert InvalidParams();
+        if (
+            c.maxOrdersPerSide == 0 || c.maxBids == 0 || c.autoSellDiscountBps == 0 || c.autoSellDiscountBps > 10_000
+                || c.autoSellTtl == 0 || c.autoSellTtl > 1000 || c.lendCutoff >= c.grid.period
+                || c.specials == address(0)
+        ) revert InvalidParams();
         uint256 k = type(uint256).max;
         for (uint256 i; i < c.chains.length; ++i) {
             if (c.chains[i].chainId == block.chainid) k = i;
@@ -86,23 +102,31 @@ contract Confluere is IConfluere, IERC6909TokenSupply, IERC3156FlashLender, Reen
         if (k == type(uint256).max) revert UnsupportedChain();
         ChainParams memory cp = c.chains[k];
         if (
-            cp.windowBlocks == 0 || cp.treasury == address(0)
-                || cp.graduationQuotes.length != cp.graduationVolumes.length
+            cp.windowBlocks == 0 || cp.treasury == address(0) || cp.graduationQuotes.length != cp.graduationFees.length
                 || cp.minNotionalQuotes.length != cp.minNotionals.length
         ) revert InvalidParams();
         GRID_ANCHOR = c.grid.anchor;
         GRID_PERIOD = c.grid.period;
         GRID_BATCH = c.grid.batchInterval;
         GRID_MAX_EXPIRIES = c.grid.maxExpiries;
-        GRID_SIG_DIGITS = c.grid.strikeSigDigits;
         WINDOW_BLOCKS = cp.windowBlocks;
         MAX_PAUSE_BLOCKS = cp.maxPauseBlocks;
         MAX_ORDERS_PER_SIDE = c.maxOrdersPerSide;
         MAX_BIDS = c.maxBids;
         treasury = cp.treasury;
         guardian = cp.guardian;
+        if (cp.maxPauseBlocks > type(uint32).max || c.lendCutoff > type(uint32).max) revert InvalidParams();
+        PARAMS_A = uint256(uint160(cp.treasury)) | uint256(c.maxOrdersPerSide) << 160 | uint256(c.maxBids) << 192
+            | uint256(c.autoSellDiscountBps) << 224 | uint256(c.autoSellTtl) << 240;
+        PARAMS_B = uint256(cp.windowBlocks) | uint256(c.grid.anchor) << 64 | uint256(c.grid.batchInterval) << 128
+            | uint256(c.grid.period) << 192;
+        PARAMS_C = uint256(uint160(c.specials)) | uint256(cp.maxPauseBlocks) << 160 | uint256(c.lendCutoff) << 192;
+        AUTOSELL_DISCOUNT_BPS = c.autoSellDiscountBps;
+        AUTOSELL_TTL = c.autoSellTtl;
+        LEND_CUTOFF = c.lendCutoff;
+        SPECIALS = c.specials;
         for (uint256 i; i < cp.graduationQuotes.length; ++i) {
-            s.graduationVolume[cp.graduationQuotes[i]] = cp.graduationVolumes[i];
+            s.graduationFee[cp.graduationQuotes[i]] = cp.graduationFees[i];
         }
         for (uint256 i; i < cp.minNotionalQuotes.length; ++i) {
             s.minNotional[cp.minNotionalQuotes[i]] = cp.minNotionals[i];
@@ -112,21 +136,12 @@ contract Confluere is IConfluere, IERC6909TokenSupply, IERC3156FlashLender, Reen
     // ================================================================ pools
 
     /// @inheritdoc IConfluere
-    function createPool(PoolKey calldata key, uint16 feeBps, uint16 bandBps)
+    function createPool(PoolKey calldata key, int16 strikeIndex, PoolOptions calldata opts)
         external
         nonReentrant
-        returns (bytes32 poolId)
+        returns (bytes32)
     {
-        return OrderLogic.createPool(s, grid(), key, feeBps, bandBps, PoolOptions(0, 0, 0, 0));
-    }
-
-    /// @inheritdoc IConfluere
-    function createPoolWithOptions(PoolKey calldata key, uint16 feeBps, uint16 bandBps, PoolOptions calldata opts)
-        external
-        nonReentrant
-        returns (bytes32 poolId)
-    {
-        return OrderLogic.createPool(s, grid(), key, feeBps, bandBps, opts);
+        return OrderLogic.createPool(s, grid(), key, strikeIndex, opts);
     }
 
     // ================================================================ orders
@@ -176,19 +191,27 @@ contract Confluere is IConfluere, IERC6909TokenSupply, IERC3156FlashLender, Reen
 
     /// @inheritdoc IConfluere
     function mature(bytes32 poolId) external nonReentrant {
-        PoolState storage ps = s.pool(poolId);
-        if (ps.status != Status.Open || block.timestamp < ps.key.expiry) revert InvalidState();
-        ps.status = Status.Window;
-        // one window per expiry: the first mature() of an expiry starts it, later pools join it
-        uint64 end = s.windowEnd[ps.key.expiry];
-        if (end == 0) s.windowEnd[ps.key.expiry] = end = uint64(block.number) + WINDOW_BLOCKS;
-        ps.windowEnd = end;
-        emit Matured(poolId, end);
+        WindowLogic.mature(s, _params(), poolId);
     }
 
     /// @inheritdoc IConfluere
-    function repay(bytes32 poolId, uint96 units) external nonReentrant {
-        WindowLogic.repay(s, _params(), poolId, units);
+    function repay(bytes32 poolId, uint96 units) external nonReentrant returns (uint256, uint256) {
+        return WindowLogic.repay(s, _params(), poolId, units);
+    }
+
+    /// @inheritdoc IConfluere
+    function lend(bytes32 poolId, uint96 units, address to, uint128 margin, uint128 fee) external nonReentrant {
+        WindowLogic.lend(s, _params(), poolId, units, to, margin, fee);
+    }
+
+    /// @inheritdoc IConfluere
+    function returnLent(bytes32 poolId, uint96 units, uint128 marginOut, address marginTo) external nonReentrant {
+        WindowLogic.returnLent(s, _params(), poolId, units, marginOut, marginTo);
+    }
+
+    /// @inheritdoc IConfluere
+    function topUpLent(bytes32 poolId, uint128 amount) external nonReentrant {
+        WindowLogic.topUpLent(s, _params(), poolId, amount);
     }
 
     /// @inheritdoc IConfluere
@@ -202,7 +225,7 @@ contract Confluere is IConfluere, IERC6909TokenSupply, IERC3156FlashLender, Reen
 
     /// @inheritdoc IConfluere
     function closeWindow(bytes32 poolId, uint256 maxBids) external nonReentrant returns (bool) {
-        return WindowLogic.closeWindow(s, poolId, maxBids);
+        return WindowLogic.closeWindow(s, _params(), poolId, maxBids);
     }
 
     /// @inheritdoc IConfluere
@@ -225,32 +248,13 @@ contract Confluere is IConfluere, IERC6909TokenSupply, IERC3156FlashLender, Reen
     /// @dev Only for pools of markets that have not graduated. Blocks new orders and clearing, never cancel,
     /// repay, bids or claims. Marks the expiry as bad for graduation.
     function pause(bytes32 poolId, uint64 blocks) external {
-        PoolState storage ps = s.pool(poolId);
         if (msg.sender != guardian) revert NotOwner();
-        if (s.graduated[ps.marketId] || blocks == 0 || blocks > MAX_PAUSE_BLOCKS) revert InvalidParams();
-        uint64 until = uint64(block.number) + blocks;
-        ps.pausedUntil = until;
-        s.stats[ps.marketId][ps.key.expiry].bad = true;
-        emit Paused(poolId, until);
+        WindowLogic.pause(s, _params(), poolId, blocks);
     }
 
     /// @inheritdoc IConfluere
-    /// @dev Permissionless. A market graduates after GRADUATION_CYCLES consecutive past expiries that each reached
-    /// the per-quote volume baseline with no pause and no circuit breaker. Graduation is permanent.
     function graduate(address asset, address quote, Kind kind, uint64 lastExpiry) external {
-        bytes32 m = PoolKeyLib.marketId(asset, quote, kind);
-        uint256 threshold = s.graduationVolume[quote];
-        GridConfig memory g = grid();
-        if (s.graduated[m] || threshold == 0 || !Grid.isOnGrid(g, lastExpiry) || lastExpiry >= block.timestamp) {
-            revert InvalidParams();
-        }
-        if (lastExpiry < g.anchor + uint256(g.period) * (GRADUATION_CYCLES - 1)) revert InvalidParams();
-        for (uint256 i; i < GRADUATION_CYCLES; ++i) {
-            MarketStats storage st = s.stats[m][uint64(lastExpiry - i * g.period)];
-            if (st.bad || st.volume < threshold) revert InvalidState();
-        }
-        s.graduated[m] = true;
-        emit PoolGraduated(m, lastExpiry);
+        WindowLogic.graduate(s, _params(), asset, quote, kind, lastExpiry);
     }
 
     // ================================================================ flash loans (ERC-3156)
@@ -339,7 +343,7 @@ contract Confluere is IConfluere, IERC6909TokenSupply, IERC3156FlashLender, Reen
     // ================================================================ views
 
     function grid() public view returns (GridConfig memory) {
-        return GridConfig(GRID_ANCHOR, GRID_PERIOD, GRID_BATCH, GRID_MAX_EXPIRIES, GRID_SIG_DIGITS);
+        return GridConfig(GRID_ANCHOR, GRID_PERIOD, GRID_BATCH, GRID_MAX_EXPIRIES);
     }
 
     function pool(bytes32 poolId) external view returns (PoolView memory v) {
@@ -347,35 +351,53 @@ contract Confluere is IConfluere, IERC6909TokenSupply, IERC3156FlashLender, Reen
         v.key = ps.key;
         v.status = ps.status;
         v.assetDecimals = ps.assetDecimals;
-        v.feeBps = ps.feeBps;
-        v.bandBps = ps.bandBps;
+        v.strikeIndex = ps.strikeIndex;
         v.bandFailures = ps.bandFailures;
         v.settleCount = ps.settleCount;
         v.lastSettledBatch = ps.lastSettledBatch;
         v.windowEnd = ps.windowEnd;
         v.pausedUntil = ps.pausedUntil;
+        v.pausedBlocks = ps.pausedBlocks;
         v.lastClearingPrice = ps.lastClearingPrice;
         v.bandBase = ps.bandBase;
         v.quoteBal = ps.quoteBal;
         v.assetBal = ps.assetBal;
         v.surplusBal = ps.surplusBal;
-        v.vwap = CoreLib.vwap(ps);
+        v.feeEscrow = ps.feeEscrow;
+        v.filledUnits = ps.filledUnits;
+        v.repaidUnits = ps.repaidUnits;
         v.closeRemaining = ps.closeRemaining;
-        v.options = PoolOptions(ps.cadence, ps.minFill, ps.firstLo, ps.firstHi);
+        v.lentUnits = ps.lentUnits;
+        v.lentMargin = ps.lentMargin;
+        v.shortUnits = ps.shortUnits;
+        v.shortMargin = ps.shortMargin;
+        v.autoSellPool = ps.autoSellPool;
+        v.autoSellOrder = ps.autoSellOrder;
+        v.autoSellUnits = ps.autoSellUnits;
+        v.options = PoolOptions(ps.minFill, ps.firstLo, ps.firstHi, ps.autoSell);
         v.batchInterval = uint64(ps.interval(GRID_BATCH));
     }
 
     function order(bytes32 poolId, uint64 orderId)
         external
         view
-        returns (address owner, uint8 side, uint96 units, uint96 limit, uint128 escrow, uint32 deadline, uint64 next)
+        returns (
+            address owner,
+            uint8 side,
+            uint8 flags,
+            uint96 units,
+            uint96 limit,
+            uint128 escrow,
+            uint32 deadline,
+            uint64 next
+        )
     {
         Order storage o = s.orders[poolId][orderId];
-        return (o.owner, o.side, o.units, o.limit, o.escrow, o.deadline, o.next);
+        return (o.owner, o.side, o.flags, o.units, o.limit, o.escrow, o.deadline, o.next);
     }
 
-    function rolloverSource(bytes32 poolId, uint64 orderId) external view returns (bytes32) {
-        return s.rolloverOld[poolId][orderId];
+    function linkedPool(bytes32 poolId, uint64 orderId) external view returns (bytes32) {
+        return s.linkedPool[poolId][orderId];
     }
 
     function bookHead(bytes32 poolId, uint8 side) external view returns (uint64, uint32) {
@@ -393,10 +415,6 @@ contract Confluere is IConfluere, IERC6909TokenSupply, IERC3156FlashLender, Reen
         return uint256(GRID_ANCHOR) + uint256(ps.lastSettledBatch + 1) * ps.interval(GRID_BATCH);
     }
 
-    function vwap(bytes32 poolId) external view returns (uint256) {
-        return CoreLib.vwap(s.pools[poolId]);
-    }
-
     function expiryWindowEnd(uint64 expiry) external view returns (uint64) {
         return s.windowEnd[expiry];
     }
@@ -405,8 +423,8 @@ contract Confluere is IConfluere, IERC6909TokenSupply, IERC3156FlashLender, Reen
         return s.graduated[marketId];
     }
 
-    function graduationVolume(address quote) external view returns (uint256) {
-        return s.graduationVolume[quote];
+    function graduationFee(address quote) external view returns (uint256) {
+        return s.graduationFee[quote];
     }
 
     /// @notice Cumulative spread share collected in a market (in its quote token). Lets the treasury split fees
@@ -429,6 +447,10 @@ contract Confluere is IConfluere, IERC6909TokenSupply, IERC3156FlashLender, Reen
         return s.stats[marketId][expiry];
     }
 
+    function tierVolume(bytes32 marketId, uint64 expiry, uint256 tierKey) external view returns (uint256) {
+        return s.tierVolume[marketId][expiry][tierKey];
+    }
+
     function pending(address token, address account) external view returns (uint256) {
         return s.pending[token][account];
     }
@@ -440,7 +462,7 @@ contract Confluere is IConfluere, IERC6909TokenSupply, IERC3156FlashLender, Reen
     // ================================================================ internals
 
     function _params() internal view returns (Params memory) {
-        return Params(treasury, MAX_ORDERS_PER_SIDE, MAX_BIDS, WINDOW_BLOCKS, GRID_ANCHOR, GRID_BATCH);
+        return Params(PARAMS_A, PARAMS_B, PARAMS_C);
     }
 
     /// @dev R units locked in a pending rollover cannot move.

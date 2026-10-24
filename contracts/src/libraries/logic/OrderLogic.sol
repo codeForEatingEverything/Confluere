@@ -8,13 +8,15 @@ import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {IERC20Metadata} from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
 import {Order, SELL, BUY, NC_SELL, NC_BUY, BID, FLAG_ROLLOVER, FLAG_LOCKED} from "../OrderSet.sol";
 import {Clearing} from "../Clearing.sol";
+import {Settlement} from "../Settlement.sol";
 import {SafeCast} from "@openzeppelin/contracts/utils/math/SafeCast.sol";
-import {CoreState, PoolState, Params, CoreLib} from "../State.sol";
+import {CoreState, PoolState, Params, ParamsLib, CoreLib} from "../State.sol";
 
 /// @notice Order entry, cancellation and abandonment-auction bids. Linked library; runs in the core's context.
 library OrderLogic {
     using CoreLib for CoreState;
     using CoreLib for PoolState;
+    using ParamsLib for Params;
     using PoolKeyLib for bytes32;
 
     uint16 internal constant MAX_TTL = 1000;
@@ -25,25 +27,25 @@ library OrderLogic {
         CoreState storage s,
         GridConfig memory g,
         PoolKey calldata key,
-        uint16 feeBps,
-        uint16 bandBps,
-        IConfluere.PoolOptions memory opts
+        int16 strikeIndex,
+        IConfluere.PoolOptions calldata opts
     ) external returns (bytes32 poolId) {
         if (key.asset == key.quote || key.asset.code.length == 0 || key.quote.code.length == 0) {
             revert IConfluere.BadToken();
         }
-        if (feeBps != 1000 && feeBps != 1250 && feeBps != 1500) revert IConfluere.InvalidParams();
-        if (bandBps != 150 && bandBps != 800 && bandBps != 1500) revert IConfluere.InvalidParams();
+        uint16 band = key.bandBps;
+        if (band != 150 && band != 800 && band != 1500) revert IConfluere.InvalidParams();
         if (!Grid.isListableExpiry(g, key.expiry, block.timestamp)) revert IConfluere.InvalidParams();
-        if (key.strike > type(uint96).max || !Grid.isGridStrike(g, key.strike)) revert IConfluere.InvalidParams();
-        if (opts.cadence > 2 || (opts.firstHi != 0 && opts.firstLo > opts.firstHi)) revert IConfluere.InvalidParams();
+        if (key.cadence > 2 || (opts.firstHi != 0 && opts.firstLo > opts.firstHi)) revert IConfluere.InvalidParams();
 
         poolId = PoolKeyLib.toId(key);
         PoolState storage ps = s.pools[poolId];
         if (ps.status != Status.None) revert IConfluere.InvalidPool();
 
         uint8 dec = IERC20Metadata(key.asset).decimals();
-        if (dec > 30) revert IConfluere.BadToken();
+        uint8 qd = IERC20Metadata(key.quote).decimals();
+        if (dec > 30 || qd > 30) revert IConfluere.BadToken();
+        if (!Grid.isGridStrike(key.strike, strikeIndex, qd)) revert IConfluere.InvalidParams();
         _probe(key.asset);
         _probe(key.quote);
 
@@ -51,18 +53,17 @@ library OrderLogic {
         ps.marketId = PoolKeyLib.marketId(key.asset, key.quote, key.kind);
         ps.status = Status.Open;
         ps.assetDecimals = dec;
-        ps.feeBps = feeBps;
-        ps.bandBps = bandBps;
-        ps.cadence = opts.cadence;
+        ps.strikeIndex = strikeIndex;
+        ps.autoSell = opts.autoSell;
         ps.minFill = opts.minFill;
         ps.firstLo = opts.firstLo;
         ps.firstHi = opts.firstHi;
         uint256 iv = ps.interval(g.batchInterval);
         if (iv > g.period) revert IConfluere.InvalidParams();
         ps.lastSettledBatch = uint64((block.timestamp - g.anchor) / iv);
-        emit IConfluere.PoolCreated(poolId, key, feeBps, bandBps, ps.marketId);
-        if (opts.cadence != 0 || opts.minFill != 0 || opts.firstLo != 0 || opts.firstHi != 0) {
-            emit IConfluere.PoolOptionsSet(poolId, opts.cadence, opts.minFill, opts.firstLo, opts.firstHi);
+        emit IConfluere.PoolCreated(poolId, key, strikeIndex, ps.marketId);
+        if (opts.minFill != 0 || opts.firstLo != 0 || opts.firstHi != 0 || opts.autoSell) {
+            emit IConfluere.PoolOptionsSet(poolId, opts.minFill, opts.firstLo, opts.firstHi, opts.autoSell);
         }
     }
 
@@ -104,8 +105,8 @@ library OrderLogic {
         } else if (p.side == BUY) {
             if (p.units == 0 || p.limit == 0 || p.budget != 0) revert IConfluere.InvalidParams();
             s.requireMinNotional(ps, p.units);
-            // Escrow covers the full order at its limit plus 1 wei of rounding per batch it can trade in.
-            uint256 esc = Clearing.quoteUp(p.units, p.limit, ps.scale()) + p.ttl;
+            // Escrow covers the full order at its limit, its trade fee, and 2 wei of rounding per batch it can trade in.
+            uint256 esc = Settlement.buyEscrow(p.units, p.limit, ps.scale(), p.ttl);
             o.units = p.units;
             o.limit = p.limit;
             o.escrow = SafeCast.toUint128(esc);
@@ -147,9 +148,13 @@ library OrderLogic {
         }
         if (a.units == 0 || a.minPrice == 0 || a.ttl == 0 || a.ttl > MAX_TTL) revert IConfluere.InvalidParams();
 
-        // Each fill needs at most f*(K - minPrice)/scale + 2 wei of top-up (one wei of rounding on each leg).
+        // The top-up is largest when the new pool clears at minPrice: K - minPrice per unit, plus the seller's trade
+        // fee and spread share at minPrice, plus rounding (one wei on each leg and on each fee) per batch.
+        uint256 sc = op.scale();
         uint256 k = op.key.strike;
-        uint256 need = (k > a.minPrice ? Clearing.quoteUp(a.units, k - a.minPrice, op.scale()) : 0) + 2 * uint256(a.ttl);
+        uint256 need = (k > a.minPrice ? Clearing.quoteUp(a.units, k - a.minPrice, sc) : 0)
+            + Settlement.tradeFee(Clearing.quoteUp(a.units, a.minPrice, sc))
+            + Settlement.spreadShare(a.units, np.key.strike, a.minPrice, sc) + 4 * uint256(a.ttl);
         if (a.maxTopUp < need) revert IConfluere.InvalidParams();
 
         s.requireMinNotional(op, a.units);
@@ -165,7 +170,7 @@ library OrderLogic {
         o.units = a.units;
         o.limit = a.minPrice;
         o.escrow = a.maxTopUp;
-        s.rolloverOld[a.newPoolId][id] = a.oldPoolId;
+        s.linkedPool[a.newPoolId][id] = a.oldPoolId;
         CoreLib.pullExact(np.key.quote, a.maxTopUp);
         s.insert(pr, a.newPoolId, np, id, a.hint);
         emit IConfluere.OrderPlaced(a.newPoolId, id, msg.sender, SELL, a.units, a.minPrice, a.maxTopUp, o.deadline);
@@ -190,12 +195,12 @@ library OrderLogic {
         // it is still "just before clearing"). Anyone can settle to lift the latter; while paused nothing can settle,
         // so that rule is off then.
         if (
-            ps.cadence != 0 && o.side != BID && o.deadline > ps.settleCount && ps.status == Status.Open
+            ps.key.cadence != 0 && o.side != BID && o.deadline > ps.settleCount && ps.status == Status.Open
                 && block.timestamp < ps.key.expiry
         ) {
-            uint256 iv = ps.interval(pr.batchInterval);
-            uint256 cur = (block.timestamp - pr.anchor) / iv;
-            uint256 next = pr.anchor + (cur + 1) * iv;
+            uint256 iv = ps.interval(pr.batchInterval());
+            uint256 cur = (block.timestamp - pr.anchor()) / iv;
+            uint256 next = pr.anchor() + (cur + 1) * iv;
             bool due = cur > ps.lastSettledBatch && block.number >= ps.pausedUntil;
             if (due || next - block.timestamp <= iv / 12) revert IConfluere.InvalidState();
         }
@@ -211,7 +216,7 @@ library OrderLogic {
             if (o.owner == address(0) || o.side == BID) continue;
             bool dead = tradingOver || o.deadline <= ps.settleCount;
             if (!dead && o.flags & FLAG_ROLLOVER != 0) {
-                PoolState storage op = s.pools[s.rolloverOld[poolId][ids[i]]];
+                PoolState storage op = s.pools[s.linkedPool[poolId][ids[i]]];
                 dead = !s.windowOpen(op) && (op.status != Status.Open || block.timestamp >= op.key.expiry);
             }
             if (dead) s.removeWithRefund(poolId, ps, ids[i], CoreLib.RM_EXPIRED);

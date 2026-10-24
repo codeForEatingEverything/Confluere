@@ -17,7 +17,7 @@ contract WindowAlignTest is Base {
 
     function test_laterPoolsJoinTheFirstWindow() public {
         bytes32 a = _create(K, Kind.American, E1);
-        bytes32 b = _create(3100e6, Kind.European, E1);
+        bytes32 b = _create(K_HI, Kind.European, E1);
         vm.warp(E1);
         assertEq(core.expiryWindowEnd(E1), 0, "not started before the first mature");
         core.mature(a);
@@ -50,7 +50,7 @@ contract WindowAlignTest is Base {
 
     function test_americanCannotRepayAfterTheSharedWindowEvenIfNeverMatured() public {
         bytes32 a = _create(K, Kind.American, E1);
-        bytes32 b = _create(3100e6, Kind.American, E1);
+        bytes32 b = _create(K_HI, Kind.American, E1);
         _borrow(b, alice, ONE, 2900e6);
         vm.warp(E1);
         core.mature(a);
@@ -87,7 +87,7 @@ contract WindowAlignTest is Base {
 
     function test_purgeKeepsRolloverWhileSharedWindowRuns() public {
         bytes32 p1 = _create(K, Kind.American, E1);
-        bytes32 other = _create(3100e6, Kind.American, E1);
+        bytes32 other = _create(K_HI, Kind.American, E1);
         bytes32 p2 = _create(K, Kind.American, E2);
         _borrow(p1, alice, ONE, 2900e6);
         uint64 hint = core.findHint(p2, SELL, 2850e6);
@@ -106,7 +106,7 @@ contract WindowAlignTest is Base {
 
     function test_rolloverCannotStartAfterTheSharedWindow() public {
         bytes32 p1 = _create(K, Kind.American, E1);
-        bytes32 other = _create(3100e6, Kind.American, E1);
+        bytes32 other = _create(K_HI, Kind.American, E1);
         bytes32 p2 = _create(K, Kind.American, E2);
         _borrow(p1, alice, ONE, 2900e6);
         vm.warp(E1);

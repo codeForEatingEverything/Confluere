@@ -56,14 +56,16 @@ testnet_params() {
       R=https://testnet-rpc.monad.xyz
       NAME=monad-testnet
       export LST=$M_SHMON NATIVE=$M_WMON USDC=$M_USDC
+      # v0.8 strikes sit on the 1% log grid (Grid.strikeAt(n, quoteDecimals)): *_STRIKE_N is the canonical index the
+      # core's createPool takes, *_STRIKE_LOW / HIGH the matching K (packages/sdk strikeAt gives the same values).
       # One buy-back price per pair (equal strikes: CreatePools opens a single strike), about 90% of the collateral's
       # normal market value on the 2-digit grid (2026-10-13): shMON ≈ 1 MON (the testnet shMON contract's 12.9 MON
       # redemption rate is a testnet artefact, not a price), MON ≈ 0.0249 USDC (Kuru MON_USDC mid).
-      export LST_STRIKE_HIGH=900000000000000000 LST_STRIKE_LOW=900000000000000000 # 0.90 WMON per shMON (90%)
-      export USD_STRIKE_LOW=22000 USD_STRIKE_HIGH=22000                          # 0.022 USDC per WMON (88%)
+      export LST_STRIKE_N=-11 LST_STRIKE_HIGH=896323717517805234 LST_STRIKE_LOW=896323717517805234 # 1.01^-11 ≈ 0.896 WMON per shMON
+      export USD_STRIKE_N=-384 USD_STRIKE_LOW=21907 USD_STRIKE_HIGH=21907       # 1.01^-384 ≈ 0.0219 USDC per WMON (88%)
       # Extra pair shMON/USDC (every pair of MON/WMON/shMON/USDC that can be a market), same price as WMON/USDC.
       export EXTRA_ASSET=$M_SHMON EXTRA_QUOTE=$M_USDC EXTRA_BAND=800
-      export EXTRA_STRIKE_LOW=22000 EXTRA_STRIKE_HIGH=22000
+      export EXTRA_STRIKE_N=-384 EXTRA_STRIKE_LOW=21907 EXTRA_STRIKE_HIGH=21907
       # Seed units: WMON/USDC 0.02 WMON (one seed plus the trade rounds clear the 0.001 USDC graduation row);
       # shMON/WMON 0.002 shMON and shMON/USDC 0.005 shMON, just above the 0.001 WMON / 0.0001 USDC order minimums
       # (the wallet holds little shMON; neither pair has to graduate)
@@ -78,11 +80,11 @@ testnet_params() {
       export NATIVE=$H_WHYPE USDC=$H_USDC LST=$ZERO
       # One buy-back price per pair at about 90% of the normal market value: HYPE ≈ 83.1 USDC on HyperCore mainnet spot
       # (2026-10-13; the testnet book's ~29 is a testnet artefact): 75 USDC per WHYPE (90%).
-      export USD_STRIKE_LOW=75000000 USD_STRIKE_HIGH=75000000
+      export USD_STRIKE_N=434 USD_STRIKE_LOW=75071695 USD_STRIKE_HIGH=75071695 # 1.01^434 ≈ 75.07 USDC
       # Extra pair USDC/WHYPE (CreatePools EXTRA_*): lends the native coin against USDC, as shMON/WMON does on Monad.
       # Strike in WHYPE per USDC: 0.011 (1 / 83.1 = 0.01204, so about 91%). 8% band like the USD pools (not pegged).
       export EXTRA_ASSET=$H_USDC EXTRA_QUOTE=$H_WHYPE EXTRA_BAND=800
-      export EXTRA_STRIKE_LOW=11000000000000000 EXTRA_STRIKE_HIGH=11000000000000000
+      export EXTRA_STRIKE_N=-453 EXTRA_STRIKE_LOW=11025992086967947 EXTRA_STRIKE_HIGH=11025992086967947 # 1.01^-453 ≈ 0.01103 WHYPE
       # Seed units: WHYPE/USDC 0.001 WHYPE (clears the 0.001 USDC graduation row many times over); USDC/WHYPE 0.2 USDC,
       # above the 0.001 WHYPE order minimum (its 0.1 WHYPE graduation row would need ~2.3 USDC per order: not seeded)
       export SEED_UNIT_BPS=${SEED_UNIT_BPS:-10} EXTRA_SEED_UNIT_BPS=${EXTRA_SEED_UNIT_BPS:-2000}
@@ -101,11 +103,11 @@ testnet_params() {
       # (2026-10-23). wstETH is worth what it redeems for on this chain, 1.0377 ETH (stEthPerToken: unlike shMON's,
       # the Sepolia rate is what staking pays here): 0.93 WETH (90%). ETH ≈ 2375 USD (Ethereum mainnet Chainlink
       # ETH/USD; the Sepolia DEX books are testnet artefacts): 2100 USDC per WETH (88%).
-      export LST_STRIKE_HIGH=930000000000000000 LST_STRIKE_LOW=930000000000000000 # 0.93 WETH per wstETH
-      export USD_STRIKE_LOW=2100000000 USD_STRIKE_HIGH=2100000000                # 2100 USDC per WETH
+      export LST_STRIKE_N=-7 LST_STRIKE_HIGH=932718054707135373 LST_STRIKE_LOW=932718054707135373 # 1.01^-7 ≈ 0.9327 WETH per wstETH
+      export USD_STRIKE_N=769 USD_STRIKE_LOW=2104439470 USD_STRIKE_HIGH=2104439470 # 1.01^769 ≈ 2104 USDC per WETH
       # Extra pair wstETH/USDC (as shMON/USDC on Monad): 1.0377 x 2375 = 2465 USD, 2200 USDC per wstETH (89%).
       export EXTRA_ASSET=$S_WSTETH EXTRA_QUOTE=$S_USDC EXTRA_BAND=800
-      export EXTRA_STRIKE_LOW=2200000000 EXTRA_STRIKE_HIGH=2200000000
+      export EXTRA_STRIKE_N=773 EXTRA_STRIKE_LOW=2189888152 EXTRA_STRIKE_HIGH=2189888152 # 1.01^773 ≈ 2190 USDC
       # Seed units, small because faucet Sepolia ETH and USDC are scarce: WETH/USDC and wstETH/USDC 0.0001 (the
       # smallest unit; ~0.21 USDC per order clears the 0.001 USDC graduation row many times over); wstETH/WETH
       # 0.0012 wstETH (0.00112 WETH at K, just above the 0.001 WETH order minimum; like shMON/WMON it need not
@@ -154,8 +156,9 @@ testnet_env() {
 }
 
 # The graduation / order-minimum rows of the three testnets (Deploy.s.sol GRAD_<chainId>):
-# quote:graduationVolume:minNotional:seatObligation, small testnet values (USDC min order 0.0001, native 0.001).
-# Graduation needs this volume in each of four consecutive expiries: 0.001 USDC and 0.1 native, so the small seeds of
+# quote:graduationFee:minNotional:seatObligation, small testnet values (USDC min order 0.0001, native 0.001).
+# v0.8: graduation needs these treasury fees (trade fees at clearing + spread share at close) in each of four
+# consecutive expiries: 4 base units of USDC (0.000004) and 1e12 wei of the native coin, so the small seeds of
 # scripts/roll-testnet.sh graduate the native/USDC market and let the vaults invest; scripts/test/grad-seed.test.sh
 # checks one seed clears them. The whole table is part of the core's init code (every chain carries every row, so they
 # share one core address): changing any value here and redeploying gives a NEW core address on every chain. Adding
@@ -167,9 +170,9 @@ testnet_env() {
 # (and the pegged vault) will in practice not graduate. It is in the init code of the 0xc0f3 core already deployed on
 # Sepolia (2026-10-23); pick a smaller value (e.g. 0.01 WETH) before the next joint redeploy (IMPLEMENTATION_NOTES §7).
 testnet_grad() {
-  export GRAD_10143="$M_WMON:100000000000000000:1000000000000000:100000000000000000,$M_USDC:1000:100:100000"
-  export GRAD_998="$H_WHYPE:100000000000000000:1000000000000000:100000000000000000,$H_USDC:1000:100:100000"
-  export GRAD_11155111="$S_WETH:100000000000000000:1000000000000000:100000000000000000,$S_USDC:1000:100:100000"
+  export GRAD_10143="$M_WMON:1000000000000:1000000000000000:100000000000000000,$M_USDC:4:100:100000"
+  export GRAD_998="$H_WHYPE:1000000000000:1000000000000000:100000000000000000,$H_USDC:4:100:100000"
+  export GRAD_11155111="$S_WETH:1000000000000:1000000000000000:100000000000000000,$S_USDC:4:100:100000"
 }
 
 # File mtime in seconds: GNU stat (Linux) first, BSD stat (macOS) second.
@@ -356,8 +359,8 @@ trap 'exit 130' INT TERM
 # Crossing layout (SEED_APR_BPS=0, Seed.s.sol _seedPool): per pool 1+2+3 units sold, and the same units bought at
 # 97/98/99% of K. A pair whose two strikes are equal is one strike (CreatePools). The loop pair uses
 # LST_SEED_UNIT_BPS, the extra pair EXTRA_SEED_UNIT_BPS.
-# Each buy escrows exactly what the core's placeOrder pulls (OrderLogic, BUY):
-# quoteUp(units * limit) + ttl, i.e. the quote rounded up per order plus 1 wei per batch of its ttl (SEED_TTL below).
+# Each buy escrows exactly what the core's placeOrder pulls (OrderLogic, BUY, v0.8 fees): g = quoteUp(units * limit),
+# g + floor(g * 150 / 1e6) (the buyer's 0.015% trade fee) + 2 wei per batch of its ttl (SEED_TTL below).
 # FUND=1 wraps the missing wrapped-native amount from the native balance (deposit()) and, where the LST mints for
 # native coin sent to it (LST_FUND=receive: wstETH on Sepolia), stakes the missing LST the same way; USDC and shMON must
 # be obtained by hand (Circle faucet; FastLane deposit). GAS_RESERVE (wei, default 0.5 native; testnet_params may set a
@@ -401,6 +404,9 @@ preflight() {
     "${toks[*]}" "${pairs[*]}" "$nexp" "${SEED_APR_BPS:-0}" "${TRADE_ROUNDS:-0}" <<'PY'
 import sys
 gas, reserve, ttl, toks, pairs, nexp, apr, rounds = sys.argv[1:]
+def esc(units, limit, d, ttl):
+    g = -(-units * limit // 10 ** d)
+    return g + g * 150 // 1_000_000 + 2 * ttl  # SDK buyEscrow
 ttl, nexp, book, rounds = int(ttl), int(nexp), int(apr) > 0, int(rounds)
 tok = {}  # lowercase address -> [label, decimals, balance, need]
 order = []
@@ -416,16 +422,16 @@ for p in pairs.split():
     for k in strikes:
         if book:
             # Seed._seedBook + trade(), per kind (2) and expiry: 2 + rounds sells and buys of u, each buy escrowing
-            # quoteUp(u, limit, 10**d) + ttl with limit < K (OrderLogic placeOrder, BUY)
+            # buyEscrow(u, limit, ttl) valued at K > limit (OrderLogic placeOrder, BUY)
             n = 2 * nexp * (2 + rounds)
             tok[asset.lower()][3] += n * u
-            tok[quote.lower()][3] += n * (-(-u * k // 10 ** d) + ttl)
+            tok[quote.lower()][3] += n * esc(u, k, d, ttl)
             continue
         # Seed._seedPool per kind (2): sells of u*(j+1) (6 units), buys of u*(j+1) at K*(97+j)/100 for j = 0..2
         tok[asset.lower()][3] += 2 * nexp * 6 * u
         for j in range(3):
             units, limit = u * (j + 1), k * (97 + j) // 100
-            tok[quote.lower()][3] += 2 * nexp * (-(-units * limit // 10 ** d) + ttl)
+            tok[quote.lower()][3] += 2 * nexp * esc(units, limit, d, ttl)
 labels = {tok[a][0] for a in order}
 for lbl in ("lst", "native", "usdc"):  # the launch labels always print (lst 0 0 0 without an LST)
     if lbl not in labels:

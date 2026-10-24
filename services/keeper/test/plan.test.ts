@@ -22,6 +22,7 @@ describe("dueAction", () => {
     expect(dueAction({ ...base, status: Status.Window, windowEnd: 100n }, 0, 99n, 5)).toBe("none");
     expect(dueAction({ ...base, status: Status.Window, windowEnd: 100n }, 0, 100n, 5)).toBe("close");
     expect(dueAction({ ...base, status: Status.Closing }, 0, 0n, 5)).toBe("close");
+    expect(dueAction({ ...base, status: Status.Selling }, 0, 0n, 5)).toBe("close");
     expect(dueAction({ ...base, status: Status.Closed }, 0, 0n, 5)).toBe("none");
   });
 });
@@ -36,13 +37,13 @@ describe("pokeDue", () => {
 });
 
 describe("missedBatchEnd (mirrors SeatRegistry.slash)", () => {
-  it("mainstream pool: the base batch after the last quote", () => {
-    // quoted in base batch 10 (interval 1800): missed batch 11 ends at (12)*1800
-    expect(missedBatchEnd(0, 1800, 10, 1800)).toBe(12 * 1800);
+  it("mainstream pool: two consecutive base batches after the last quote (v0.8)", () => {
+    // quoted in base batch 10 (interval 1800): missed batches 11 and 12, the second ends at 13*1800
+    expect(missedBatchEnd(0, 1800, 10, 1800)).toBe(13 * 1800);
   });
-  it("6 h long-tail pool: the first full 6 h batch after the quote", () => {
-    // quote ends at 11*1800 = 19800; next 6 h boundary is 21600; missed batch ends at 43200
-    expect(missedBatchEnd(0, 1800, 10, 21600)).toBe(43200);
+  it("6 h long-tail pool: the first two full 6 h batches after the quote", () => {
+    // quote ends at 11*1800 = 19800; next 6 h boundary is 21600; two missed batches end at 64800
+    expect(missedBatchEnd(0, 1800, 10, 21600)).toBe(64800);
   });
 });
 

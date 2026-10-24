@@ -252,21 +252,22 @@ grep -q "STOP: balances do not cover one seed" "$T/out" || fail "no stop message
 grep -q "faucet.circle.com" "$T/out" || fail "no USDC hint"
 TRADE_ROUNDS=3 lib 'preflight' > "$T/out" 2>&1 || fail "preflight failed when funded"
 # Book layout (SEED_APR_BPS=1000) at one strike per pair, one expiry, 3 trade rounds: per pool and kind 5 sells and 5
-# buys of one unit, each buy escrowing quoteUp(u x K) + ttl (SEED_TTL=1000). HyperEVM: WHYPE/USDC at 0.001 WHYPE,
-# K 75 USDC: 10 x (75000 + 1000) USDC and 10 x 1e15 WHYPE; the extra pair USDC/WHYPE at 0.2 USDC, K 0.011 WHYPE:
-# 10 x 200000 USDC and 10 x (2.2e15 + 1000) WHYPE
-grep -qE "usdc +need 2760000 " "$T/out" || fail "HyperEVM USDC need misses the extra pair: $(grep usdc "$T/out")"
-grep -qE "native +need 32000000000010000 " "$T/out" || fail "HyperEVM WHYPE need misses the extra pair: $(grep native "$T/out")"
+# buys of one unit, each buy escrowing buyEscrow = g + floor(g x 150 / 1e6) + 2 x ttl with g = quoteUp(u x K)
+# (SEED_TTL=1000). HyperEVM: WHYPE/USDC at 0.001 WHYPE, K 1.01^434 = 75.071695 USDC: 10 x (75072 + 11 + 2000) USDC
+# and 10 x 1e15 WHYPE; the extra pair USDC/WHYPE at 0.2 USDC, K 1.01^-453 WHYPE: 10 x 200000 USDC and
+# 10 x buyEscrow WHYPE
+grep -qE "usdc +need 2770830 " "$T/out" || fail "HyperEVM USDC need misses the extra pair: $(grep usdc "$T/out")"
+grep -qE "native +need 32055291971581990 " "$T/out" || fail "HyperEVM WHYPE need misses the extra pair: $(grep native "$T/out")"
 grep -qE "^  extra" "$T/out" && fail "the extra pair's tokens (USDC, WHYPE) were counted as separate tokens"
-if TRADE_ROUNDS=3 FAKE_BAL_USDC=2759999 lib 'preflight' > "$T/out" 2>&1; then fail "preflight passed 1 unit short of the extra pair's USDC"; fi
+if TRADE_ROUNDS=3 FAKE_BAL_USDC=2770829 lib 'preflight' > "$T/out" 2>&1; then fail "preflight passed 1 unit short of the extra pair's USDC"; fi
 grep -q "faucet.circle.com" "$T/out" || fail "no USDC hint when only the extra pair is short"
-# Monad, USDC: WMON/USDC at 0.02 WMON, K 0.022: 10 x (440 + 1000); shMON/USDC at 0.005 shMON: 10 x (110 + 1000) = 25500.
+# Monad, USDC: WMON/USDC at 0.02 WMON, K 0.021907: 10 x (439 + 0 + 2000); shMON/USDC at 0.005 shMON: 10 x (110 + 2000) = 45490.
 # Just below that must stop (the seed would revert halfway); exactly that passes. Three expiries triple it.
-if TRADE_ROUNDS=3 LIBCHAIN=monad FAKE_BAL_USDC=25499 lib 'preflight' > "$T/out" 2>&1; then fail "preflight passed 1 wei short of the buys' escrow"; fi
-grep -qE "usdc +need 25500 " "$T/out" || fail "USDC need is not the escrow sum: $(grep usdc "$T/out")"
-TRADE_ROUNDS=3 LIBCHAIN=monad FAKE_BAL_USDC=25500 lib 'preflight' > "$T/out" 2>&1 || fail "preflight failed with exactly the escrow"
+if TRADE_ROUNDS=3 LIBCHAIN=monad FAKE_BAL_USDC=45489 lib 'preflight' > "$T/out" 2>&1; then fail "preflight passed 1 wei short of the buys' escrow"; fi
+grep -qE "usdc +need 45490 " "$T/out" || fail "USDC need is not the escrow sum: $(grep usdc "$T/out")"
+TRADE_ROUNDS=3 LIBCHAIN=monad FAKE_BAL_USDC=45490 lib 'preflight' > "$T/out" 2>&1 || fail "preflight failed with exactly the escrow"
 TRADE_ROUNDS=3 LIBCHAIN=monad LATER_EXPIRIES=5,6 lib 'preflight' > "$T/out" 2>&1 || true
-grep -qE "usdc +need 76500 " "$T/out" || fail "LATER_EXPIRIES not counted: $(grep usdc "$T/out")"
+grep -qE "usdc +need 136470 " "$T/out" || fail "LATER_EXPIRIES not counted: $(grep usdc "$T/out")"
 # the ttl preflight counts is the one Seed.s.sol places (it reads SEED_TTL)
 grep -q 'vm.envOr("SEED_TTL"' "$ROOT/contracts/script/Seed.s.sol" || fail "Seed.s.sol does not read SEED_TTL"
 
@@ -502,8 +503,8 @@ rm -rf "$DEP/.staging" "$T/state"/*
 : > "$CALLS"
 TRADE_ROUNDS=3 LIBCHAIN=sepolia lib 'preflight' > "$T/out" 2>&1 || fail "sepolia preflight failed when funded"
 grep -qE "lst +need 13000000000000000 " "$T/out" || fail "Sepolia wstETH need: $(grep lst "$T/out")"
-grep -qE "native +need 12160000000010000 " "$T/out" || fail "Sepolia WETH need: $(grep native "$T/out")"
-grep -qE "usdc +need 4320000 " "$T/out" || fail "Sepolia USDC need: $(grep usdc "$T/out")"
+grep -qE "native +need 12194295549004100 " "$T/out" || fail "Sepolia WETH need: $(grep native "$T/out")"
+grep -qE "usdc +need 4334960 " "$T/out" || fail "Sepolia USDC need: $(grep usdc "$T/out")"
 grep -qE "^  extra" "$T/out" && fail "Sepolia: the extra pair's tokens (wstETH, USDC) were counted as separate tokens"
 grep -q "balanceOf(address)(uint256)" <<<"$(grep "$SW" "$CALLS")" || fail "Sepolia preflight did not read wstETH"
 # no USDC: a clear stop naming the Circle faucet; FUND=1 stakes the missing wstETH (ETH sent to wstETH, at its rate
@@ -514,7 +515,7 @@ if TRADE_ROUNDS=3 LIBCHAIN=sepolia FAKE_BAL=0 FAKE_GAS=2000000000000000000 FUND=
 fi
 grep -q "faucet.circle.com" "$T/out" || fail "Sepolia: no USDC faucet hint"
 grep -q "cast send $SW --value 1037717826760305089 " "$CALLS" || fail "FUND=1 did not stake wstETH: $(grep 'cast send' "$CALLS")"
-grep -q "cast send $SE deposit() --value 12160000000010000 " "$CALLS" || fail "FUND=1 did not wrap WETH"
+grep -q "cast send $SE deposit() --value 12194295549004100 " "$CALLS" || fail "FUND=1 did not wrap WETH"
 # enough native coin to stake but not to wrap as well: the wrap would eat into the gas reserve, so it stops there
 : > "$CALLS"
 if TRADE_ROUNDS=3 LIBCHAIN=sepolia FAKE_BAL=0 FAKE_GAS=1095000000000000000 FUND=1 lib 'preflight' > "$T/out" 2>&1; then

@@ -1,6 +1,6 @@
 /** Pure helpers behind the v3 screens: quotes, the pool pick, deadlines, the vocabulary, order status. */
 import { describe, expect, it } from "vitest";
-import { Kind, Status, impliedApr, quoteDown, repayAmount, rolloverTopUp } from "@confluere/sdk";
+import { Kind, Status, impliedApr, lenderCostPerUnit, quoteDown, repayAmount, rolloverTopUp, sellerNet } from "@confluere/sdk";
 import { NOW, pid, row } from "./fixtures";
 import { borrowQuote, defaultBorrowLimit, defaultMoveBps, fixedReturn, lendQuote, minUnits, refToUnits, DAY } from "../src/lib/quote";
 import { defaultLevel, levelChoices, pickOffer, termChoices, LEVEL_LABEL } from "../src/lib/bestPool";
@@ -22,11 +22,16 @@ describe("borrow quote (§8.1.4) matches the SDK", () => {
     const q = borrowQuote({ pool: p, units: 2n * E18, now: NOW });
     expect(q.price).toBe(2900_000000n);
     expect(q.estimate).toBe(false);
-    expect(q.receive).toBe(quoteDown(2n * E18, 2900_000000n, E18));
+    // v0.8: gross 5,800 − 0.015% trade fee (0.87) − 5% of the interest (10) = 5,789.13
+    expect(q.gross).toBe(quoteDown(2n * E18, 2900_000000n, E18));
+    expect(q.tradeFee).toBe(870000n);
+    expect(q.spreadShare).toBe(10_000000n);
+    expect(q.receive).toBe(sellerNet(2n * E18, 2900_000000n, 3000_000000n, E18));
+    expect(q.receive).toBe(5789_130000n);
     expect(q.repay).toBe(repayAmount(2n * E18, 3000_000000n, E18));
-    expect(q.cost).toBe(200_000000n);
-    expect(q.periodReturn).toBeCloseTo(100 / 2900, 9);
-    expect(q.apr).toBeCloseTo(impliedApr(2900_000000n, 3000_000000n, 3 * DAY), 9);
+    expect(q.cost).toBe(210_870000n);
+    expect(q.periodReturn).toBeCloseTo(210.87 / 5789.13, 9);
+    expect(q.apr).toBeCloseTo(((210.87 / 5789.13) * 365) / 3, 9);
     expect(q.showApr).toBe(true);
     expect(q.guard).toBe((2900_000000n * 9900n) / 10_000n); // 1% move in a mainstream market
   });
@@ -34,7 +39,7 @@ describe("borrow quote (§8.1.4) matches the SDK", () => {
     const u = { ...p, lastClearingPrice: 0n };
     const q = borrowQuote({ pool: u, units: E18, now: NOW, ref: 2800_000000n });
     expect(q.estimate).toBe(true);
-    expect(q.receive).toBe(2800_000000n);
+    expect(q.receive).toBe(2800_000000n - 420000n - 10_000000n); // fees on the estimate too
     expect(borrowQuote({ pool: u, units: E18, now: NOW }).receive).toBe(0n);
   });
   it("a reference price above the buy-back price is capped below it: the rate is never negative", () => {
@@ -70,10 +75,14 @@ describe("borrow quote (§8.1.4) matches the SDK", () => {
 describe("lend quote", () => {
   it("units bought below the buy-back price, paid the buy-back price if repaid", () => {
     const p = row(pid("a1")) as any;
-    const q = lendQuote({ pool: p, amount: 2900_000000n, now: NOW });
+    // the amount is all-in: 2,900.435 buys one unit at 2,900 plus the 0.015% trade fee (plus the 1 wei reserve, rounded through the fee)
+    const q = lendQuote({ pool: p, amount: 2900_435002n, now: NOW });
     expect(q.units).toBe(E18);
+    expect(q.cost).toBe(2900_000000n);
+    expect(q.tradeFee).toBe(435000n);
     expect(q.payout).toBe(3000_000000n);
-    expect(q.periodReturn).toBeCloseTo(100 / 2900, 9);
+    expect(q.periodReturn).toBeCloseTo(99.565 / 2900.435, 9);
+    expect(q.apr).toBeCloseTo(impliedApr(lenderCostPerUnit(2900_000000n), 3000_000000n, 3 * DAY), 9);
     expect(fixedReturn(p, NOW).priced).toBe(true);
     expect(fixedReturn({ ...p, lastClearingPrice: 0n }, NOW).priced).toBe(false);
   });
@@ -145,8 +154,8 @@ describe("vocabulary", () => {
     expect(vaultLine("pegged", { strikeRule: 0 }, "WMON", "shMON", "MON")).toBe("Lends MON to shMON borrowers");
     const [a, b, c] = vaultSentences({ strikeRule: 1, capBps: 2500 }, "USDC", "WHYPE");
     expect(a).toBe("This vault lends USDC to borrowers who sold WHYPE into the market. It never buys or holds WHYPE on purpose.");
-    expect(b).toBe("If a borrower doesn't repay, the vault receives their WHYPE. When you withdraw, you may get some WHYPE along with USDC.");
-    expect(c).toBe("Rule, fixed at deployment: lend at the higher buy-back price, at most 25% of idle funds each round, only into established markets. Nobody can change it.");
+    expect(b).toBe("If a borrower doesn't repay, their WHYPE is sold into the next maturity and the vault gets USDC back. You always withdraw in USDC only.");
+    expect(c).toBe("Rule, fixed at deployment: lend at the higher buy-back price, at most 25% of idle funds each round, only into established markets that sell unrepaid collateral. Nobody can change it.");
     for (const s of [a, b, c]) expect(s).not.toMatch(/stake|LST|liquidat/i);
   });
   it("network names and price sources", () => {

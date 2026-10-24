@@ -4,8 +4,10 @@
  * - quantity is capped per pool, per batch (PER_BATCH_QUOTE) and in total (TOTAL_QUOTE). The total counts quote
  *   actually paid for fills plus the escrow of bids still resting; escrow refunded by an unfilled bid does not count;
  * - only fills the gap: if competitive buy depth at or above that price already covers the batch amount, do nothing;
- * - exits for good after 8 weeks from its first start, once every market it quotes has a seat holder, or at END_AT
- *   if the operator set an earlier date.
+ * - stops quoting a market for good once it has a seat holder or its weekly volume reached EXIT_WEEKLY_VOLUME (a
+ *   deploy parameter, blueprint 13 q3); exits when every market it quotes is done, or at END_AT (v0.8: no fixed
+ *   8-week run any more);
+ * - the buyer's trade fee (0.015%) is paid out of the same budget: units are sized so cost + fee fits it.
  */
 export type PoolClass = "pegged" | "main";
 
@@ -44,7 +46,8 @@ export function quote(i: Inputs): Quote {
   const limit = (i.lastClearingPrice * (10_000n - SPREAD_BPS[i.cls])) / 10_000n;
   if (limit === 0n) return null;
   const budget = i.perBatchQuote < i.remainingQuote ? i.perBatchQuote : i.remainingQuote;
-  const target = (budget * i.scale) / limit;
+  // budget covers cost + the buyer's 0.015% trade fee (SDK TRADE_FEE_PPM)
+  const target = ((budget * 1_000_000n) / 1_000_150n * i.scale) / limit;
   if (i.competitiveDepthUnits >= target) return null;
   const units = target - i.competitiveDepthUnits;
   return units > 0n ? { limit, units } : null;
@@ -55,15 +58,20 @@ export function committed(spent: bigint, openEscrows: bigint[]): bigint {
   return openEscrows.reduce((a, b) => a + b, spent);
 }
 
-/** Fixed run length from the first start (blueprint 4.2: "run for 8 weeks"). Not configurable on purpose. */
-export const RUN_S = 8 * 7 * 86_400;
+/** One market the bot quotes: whether a seat holder took it and its quote volume over the last week. */
+export type MarketExit = { seated: boolean; weeklyVolume: bigint };
 
-export type ExitInputs = { now: number; startedAt: number; endAt: number; marketsSeated: boolean[] };
+/** A market is done (never quoted again) once seated or once its weekly volume reached the exit line (0 = no line). */
+export const marketDone = (m: MarketExit, exitWeeklyVolume: bigint): boolean =>
+  m.seated || (exitWeeklyVolume > 0n && m.weeklyVolume >= exitWeeklyVolume);
+
+export type ExitInputs = { now: number; endAt: number; markets: MarketExit[]; exitWeeklyVolume: bigint };
 
 /** Why the bot must stop now, or null to keep running. Exiting is permanent: the caller persists the reason. */
 export function exitReason(i: ExitInputs): string | null {
-  if (i.now >= i.startedAt + RUN_S) return "eight weeks elapsed";
-  if (i.marketsSeated.length > 0 && i.marketsSeated.every(Boolean)) return "seats cover every market";
+  if (i.markets.length > 0 && i.markets.every((m) => marketDone(m, i.exitWeeklyVolume))) {
+    return i.markets.every((m) => m.seated) ? "seats cover every market" : "every market seated or past the weekly volume line";
+  }
   if (i.endAt > 0 && i.now >= i.endAt) return "END_AT reached";
   return null;
 }

@@ -19,6 +19,7 @@
  *
  * Nothing here talks to a chain. Words in this file follow the contracts; the screens keep their own vocabulary.
  */
+import { nearestGridStrikes } from "@/lib/grid";
 import { ContractFunctionRevertedError, encodeErrorResult, parseAbi, zeroAddress, type Abi, type Address, type Hex } from "viem";
 import {
   Kind,
@@ -36,10 +37,13 @@ import {
   rTokenId,
   scaleOf,
   seatRegistryAbi,
-  spreadFee,
+  spreadShare,
+  tradeFee,
+  feeEscrowSplit,
+  ncUnits,
   buyEscrow,
   vaultAbi,
-  isGridStrike,
+  strikeIndexOf,
 } from "@confluere/sdk";
 import { DEMO_ADDR, DEMO_GRID, demoDeploymentOf } from "./deployments";
 import { buyCost, sellOut, sellPrice } from "./sell";
@@ -104,11 +108,17 @@ type ChainSpec = {
   vaults: VaultSpec[];
   obligation: Record<string, number>;
   minNotional: Record<string, number>;
-  graduationVolume: Record<string, number>;
+  /** Treasury fees (trade fees + spread share) an expiry must earn to count toward graduation, per quote token. */
+  graduationFee: Record<string, number>;
   user: UserPlan;
 };
 
 const T0 = 1_790_000_000;
+
+/** Demo plan strikes are round numbers; v0.8 pools sit on the 1% log grid, so take the grid strike at or below. */
+function snapToGrid(k: bigint, qd: number): bigint {
+  return strikeIndexOf(k, qd) !== undefined ? k : (nearestGridStrikes(k, qd)?.lower ?? k);
+}
 
 function specOf(chainId: number): ChainSpec | undefined {
   const d = demoDeploymentOf(chainId);
@@ -151,7 +161,7 @@ function specOf(chainId: number): ChainSpec | undefined {
       ],
       obligation: { [lc(usdc)]: 400, [lc(native)]: 12 },
       minNotional: { [lc(usdc)]: 10, [lc(native)]: 0.25 },
-      graduationVolume: { [lc(usdc)]: 25_000, [lc(native)]: 600 },
+      graduationFee: { [lc(usdc)]: 7.5, [lc(native)]: 0.18 },
       user: {
         native: 120,
         tokens: [[native, 30], [usdc, 18_500], [lst, 45]],
@@ -194,7 +204,7 @@ function specOf(chainId: number): ChainSpec | undefined {
       ],
       obligation: { [lc(usdc)]: 300, [lc(native)]: 12_000 },
       minNotional: { [lc(usdc)]: 10, [lc(native)]: 400 },
-      graduationVolume: { [lc(usdc)]: 25_000, [lc(native)]: 1_000_000 },
+      graduationFee: { [lc(usdc)]: 7.5, [lc(native)]: 300 },
       user: {
         native: 4_000,
         tokens: [[native, 1_500], [usdc, 12_000], [lst, 2_200]],
@@ -239,7 +249,7 @@ function specOf(chainId: number): ChainSpec | undefined {
       ],
       obligation: { [lc(usdc)]: 300, [lc(native)]: 0.12 },
       minNotional: { [lc(usdc)]: 10, [lc(native)]: 0.004 },
-      graduationVolume: { [lc(usdc)]: 25_000, [lc(native)]: 10 },
+      graduationFee: { [lc(usdc)]: 7.5, [lc(native)]: 0.003 },
       user: {
         native: 2.5,
         tokens: [[native, 1.5], [usdc, 14_000], [lst, 3]],
@@ -277,8 +287,12 @@ type PoolS = {
   settleCount: number;
   windowEnd: B;
   lastPrice: B;
-  vwapNum: B;
-  vwapDen: B;
+  /** v0.8: 5% of (K − P) withheld from sellers at clearing, split at close by repaidUnits / filledUnits. */
+  feeEscrow: B;
+  filledUnits: B;
+  repaidUnits: B;
+  /** Treasury fees this pool earned (trade fees + treasury part of the spread escrow): MarketStats.fees input. */
+  fees: B;
   quoteBal: B;
   assetBal: B;
   volume: B;
@@ -652,8 +666,8 @@ function buildHistory(net: Net) {
     const m = spec.markets[plan.m]!;
     const qd = quoteDecOf(net, m.quote);
     const ad = net.tokens.get(lc(m.asset))?.decimals ?? 18;
-    const strike = toUnits(plan.strike, qd);
-    const id = poolId({ asset: m.asset, quote: m.quote, expiry: BigInt(plan.expiry), strike, kind: m.kind });
+    const strike = snapToGrid(toUnits(plan.strike, qd), qd);
+    const id = poolId({ asset: m.asset, quote: m.quote, expiry: BigInt(plan.expiry), strike, kind: m.kind, bandBps: m.band, cadence: 0 });
     const r = rng(st.seed ^ hashStr(id));
     const listed = Math.max(st.s0 - 30 * DAY, plan.expiry - 45 * DAY);
     const end = Math.min(st.s0, plan.expiry);
@@ -702,7 +716,8 @@ function buildHistory(net: Net) {
     if (!firstTime) continue;
     // pool state from its history
     const sum = merged.reduce((s, x) => s + x.units, 0n);
-    const vwapNum = merged.reduce((s, x) => s + x.price * x.units, 0n);
+    const escrow = merged.reduce((s, x) => s + spreadShare(x.units, strike, x.price, scaleOf(ad)), 0n);
+    const trade = merged.reduce((s, x) => s + 2n * tradeFee(quoteDown(x.units, x.price, scaleOf(ad))), 0n);
     const volume = merged.reduce((s, x) => s + quoteDown(x.units, x.price, scaleOf(ad)), 0n);
     const last = merged[merged.length - 1];
     const repaidF = plan.special === "closed" ? 0.8 : plan.special === "window" ? 0.45 : m.kind === Kind.American ? 0.08 + r() * 0.17 : 0;
@@ -720,6 +735,8 @@ function buildHistory(net: Net) {
       windowEnd = BigInt(blockAt(spec, plan.expiry) + demoDeploymentOf(spec.id)!.windowBlocks);
       st.expiryWindowEnd[String(plan.expiry)] = windowEnd;
     }
+    // a closed pool has split its fee escrow: the repaid part to the treasury, the defaulted part to C holders
+    const split = plan.special === "closed" ? feeEscrowSplit(escrow, repaid, sum) : { toTreasury: 0n, toLenders: 0n };
     const pool: PoolS = {
       id,
       asset: m.asset,
@@ -736,9 +753,11 @@ function buildHistory(net: Net) {
       settleCount: Math.max(0, Math.floor((end - listed) / iv)),
       windowEnd,
       lastPrice: last?.price ?? 0n,
-      vwapNum,
-      vwapDen: sum,
-      quoteBal: keep(repayAmount(repaid, strike, scaleOf(ad))),
+      feeEscrow: plan.special === "closed" ? 0n : escrow,
+      filledUnits: sum,
+      repaidUnits: repaid,
+      fees: trade + split.toTreasury,
+      quoteBal: keep(repayAmount(repaid, strike, scaleOf(ad)) + split.toLenders),
       assetBal: keep(sum - repaid),
       volume,
       noise,
@@ -757,10 +776,7 @@ function buildHistory(net: Net) {
     st.supply6909[rTokenId(id).toString()] = plan.special === "closed" ? 0n : sum - repaid;
     const mid = marketId(m.asset, m.quote, m.kind);
     st.graduated[mid] = m.graduated;
-    if (repaid > 0n && last) {
-      const fee = spreadFee(repaid, strike, vwapNum / (sum || 1n), m.fee, scaleOf(ad));
-      st.marketFees[mid] = (st.marketFees[mid] ?? 0n) + fee;
-    }
+    if (pool.fees > 0n) st.marketFees[mid] = (st.marketFees[mid] ?? 0n) + pool.fees;
   }
 }
 
@@ -1053,6 +1069,7 @@ function runRound(net: Net, T: number) {
       dropOrders(net, p, (o) => o.side !== Side.Bid);
     } else if (p.status === Status.Window && BigInt(blockT) >= p.windowEnd) {
       p.status = Status.Closed;
+      splitFeeEscrow(net, p);
       st.supply6909[rTokenId(p.id).toString()] = 0n;
       dropOrders(net, p, () => true);
     } else if (p.status === Status.Open && T < p.expiry) settlePool(net, p, T);
@@ -1146,7 +1163,13 @@ function settlePool(net: Net, p: PoolS, T: number) {
       const owner = lc(o.owner);
       if (sell) {
         const u = o.units;
-        const proceeds = quoteDown(u, P, sc);
+        // v0.8 seller split: gross − 0.015% trade fee − 5% of (K − P) into the pool's fee escrow (capped)
+        const gross = quoteDown(u, P, sc);
+        const tf = tradeFee(gross);
+        const spread = spreadShare(u, p.strike, P, sc) > gross - tf ? gross - tf : spreadShare(u, p.strike, P, sc);
+        const proceeds = gross - tf - spread;
+        p.feeEscrow += spread;
+        addTradeFee(net, p, tf);
         if (o.rollFrom) {
           const old = st.pools[o.rollFrom];
           const oldPay = old ? repayAmount(u, old.strike, scaleOf(old.assetDecimals)) : 0n;
@@ -1157,6 +1180,7 @@ function settlePool(net: Net, p: PoolS, T: number) {
           if (old) {
             old.quoteBal += oldPay;
             old.assetBal = sub0(old.assetBal, u);
+            old.repaidUnits += u; // a rollover fill counts as repaid in the old pool
           }
           credit(st.pending, `${lc(p.quote)}|${owner}`, sub0(proceeds + o.escrow, oldPay));
         } else credit(st.pending, `${lc(p.quote)}|${owner}`, proceeds);
@@ -1168,9 +1192,11 @@ function settlePool(net: Net, p: PoolS, T: number) {
         sold += u;
         if (o.side === Side.NcSell) nc += u;
       } else {
-        const u = o.side === Side.NcBuy ? (o.budget * sc) / P : o.units;
+        const u = o.side === Side.NcBuy ? ncUnits(o.budget, P, sc) : o.units;
         const cost = quoteUp(u, P, sc);
-        credit(st.pending, `${lc(p.quote)}|${owner}`, sub0(o.escrow, cost));
+        const tf = tradeFee(cost);
+        addTradeFee(net, p, tf);
+        credit(st.pending, `${lc(p.quote)}|${owner}`, sub0(o.escrow, cost + tf));
         credit(st.b6909, `${cTokenId(p.id)}|${owner}`, u);
         credit(st.supply6909, cTokenId(p.id).toString(), u);
         credit(st.supply6909, rTokenId(p.id).toString(), u);
@@ -1202,11 +1228,27 @@ function settlePool(net: Net, p: PoolS, T: number) {
   const impact = (x: B) => Math.min(0.012, (Number((x * 1000n) / typical) / 1000) * (m.pegged ? 0.0006 : 0.0025));
   p.noise += impact(sold) - impact(bought);
   p.lastPrice = P;
-  p.vwapNum += P * filled;
-  p.vwapDen += filled;
+  p.filledUnits += filled;
   p.volume += quoteDown(filled, P, sc);
   p.rows.push({ index: st.round, price: P, units: filled, nc, block: blockAt(spec, T) });
   if (p.rows.length > 900) p.rows = [...p.rows.slice(0, 450).filter((_, i) => i % 3 === 0), ...p.rows.slice(450)];
+}
+
+/** closeWindow (v0.8): the fee escrow splits once by repaidUnits / filledUnits, treasury vs C holders. */
+function splitFeeEscrow(net: Net, p: PoolS) {
+  if (p.feeEscrow <= 0n) return;
+  const { toTreasury, toLenders } = feeEscrowSplit(p.feeEscrow, p.repaidUnits, p.filledUnits);
+  p.feeEscrow = 0n;
+  p.quoteBal += toLenders;
+  addTradeFee(net, p, toTreasury);
+}
+
+/** A trade fee goes straight to the treasury: market fees and the pool's graduation fees. */
+function addTradeFee(net: Net, p: PoolS, fee: B) {
+  if (fee <= 0n) return;
+  const mid = marketId(p.asset, p.quote, p.kind);
+  net.st.marketFees[mid] = (net.st.marketFees[mid] ?? 0n) + fee;
+  p.fees += fee;
 }
 
 // ───────────────────────────── errors ─────────────────────────────
@@ -1263,7 +1305,9 @@ function poolView(net: Net, p: PoolS) {
     quoteBal: p.quoteBal,
     assetBal: p.assetBal,
     surplusBal: 0n,
-    vwap: p.vwapDen > 0n ? p.vwapNum / p.vwapDen : 0n,
+    feeEscrow: p.feeEscrow,
+    filledUnits: p.filledUnits,
+    repaidUnits: p.repaidUnits,
     closeRemaining: 0n,
     options: { cadence: p.cadence, minFill: p.minFill, firstLo: p.firstLo, firstHi: p.firstHi },
     batchInterval: BigInt(iv),
@@ -1286,7 +1330,9 @@ const EMPTY_POOL = {
   quoteBal: 0n,
   assetBal: 0n,
   surplusBal: 0n,
-  vwap: 0n,
+  feeEscrow: 0n,
+  filledUnits: 0n,
+  repaidUnits: 0n,
   closeRemaining: 0n,
   options: { cadence: 0, minFill: 0n, firstLo: 0n, firstHi: 0n },
   batchInterval: 0n,
@@ -1328,10 +1374,10 @@ export function readCall(chainId: number, c: Call): unknown {
         const pid = args[0] as string;
         const id = Number(args[1]);
         const o = st.orders.find((x) => x.id === id && lc(x.pool) === lc(pid));
-        if (!o) return [zeroAddress, 0, 0n, 0n, 0n, 0, 0n];
+        if (!o) return [zeroAddress, 0, 0, 0n, 0n, 0n, 0, 0n];
         const xs = bookSide(st, pid, o.side);
         const nx = xs[xs.indexOf(o) + 1];
-        return [o.owner, o.side, o.units, o.limit, o.escrow, o.deadline, BigInt(nx?.id ?? 0)];
+        return [o.owner, o.side, 0, o.units, o.limit, o.escrow, o.deadline, BigInt(nx?.id ?? 0)];
       }
       case "rolloverSource": {
         const o = st.orders.find((x) => x.id === Number(args[1]) && lc(x.pool) === lc(args[0]));
@@ -1356,10 +1402,10 @@ export function readCall(chainId: number, c: Call): unknown {
       case "marketStats": {
         const ps = Object.values(st.pools).filter((p) => marketId(p.asset, p.quote, p.kind) === args[0] && p.expiry === Number(args[1]));
         const strikes = ps.map((p) => p.strike).sort((x, y) => (x < y ? -1 : 1));
-        return { volume: ps.reduce((s, p) => s + p.volume, 0n), minStrike: strikes[0] ?? 0n, maxStrike: strikes[strikes.length - 1] ?? 0n, bad: false };
+        return { volume: ps.reduce((s, p) => s + p.volume, 0n), fees: ps.reduce((s, p) => s + p.fees, 0n), minStrike: strikes[0] ?? 0n, maxStrike: strikes[strikes.length - 1] ?? 0n, bad: false };
       }
-      case "graduationVolume": {
-        return toUnits(spec.graduationVolume[lc(args[0])] ?? 0, quoteDecOf(net, args[0]));
+      case "graduationFee": {
+        return toUnits(spec.graduationFee[lc(args[0])] ?? 0, quoteDecOf(net, args[0]));
       }
       case "grid":
         return { anchor: BigInt(DEMO_GRID.anchor), period: BigInt(DEMO_GRID.period), batchInterval: BigInt(iv), maxExpiries: DEMO_GRID.maxExpiries, strikeSigDigits: DEMO_GRID.strikeSigDigits };
@@ -1739,12 +1785,10 @@ function run(net: Net, me: Address, w: WriteCall) {
         const pay = repayAmount(units, p.strike, sc);
         pull(net, p.quote, me, core, pay, fn);
         burn6909(net, rTokenId(p.id), me, units, fn);
-        const vwap = p.vwapDen > 0n ? p.vwapNum / p.vwapDen : 0n;
-        const fee = spreadFee(units, p.strike, vwap, p.feeBps, sc);
-        p.quoteBal += pay - fee;
+        // v0.8: repay carries no fee; it counts toward the repaid share of the pool's fee escrow
+        p.quoteBal += pay;
         p.assetBal = sub0(p.assetBal, units);
-        const mid = marketId(p.asset, p.quote, p.kind);
-        st.marketFees[mid] = (st.marketFees[mid] ?? 0n) + fee;
+        p.repaidUnits += units;
         give(net, p.asset, me, units);
         return;
       }
@@ -1786,11 +1830,12 @@ function run(net: Net, me: Address, w: WriteCall) {
       }
       case "createPoolWithOptions": {
         const key = args[0] as { asset: Address; quote: Address; expiry: B; strike: B; kind: number };
-        const id = poolId({ asset: key.asset, quote: key.quote, expiry: BigInt(key.expiry), strike: BigInt(key.strike), kind: key.kind });
+        const cad = Number((args[3] as { cadence?: number } | undefined)?.cadence ?? 0);
+        const id = poolId({ asset: key.asset, quote: key.quote, expiry: BigInt(key.expiry), strike: BigInt(key.strike), kind: key.kind, bandBps: Number(args[2]), cadence: cad });
         if (st.pools[id]) revert("InvalidPool", fn);
         const e = Number(key.expiry);
         const onGrid = (e - DEMO_GRID.anchor) % DEMO_GRID.period === 0 && e > t && e <= t + DEMO_GRID.period * DEMO_GRID.maxExpiries;
-        if (!onGrid || !isGridStrike(BigInt(key.strike), DEMO_GRID.strikeSigDigits)) revert("InvalidParams", fn);
+        if (!onGrid || strikeIndexOf(BigInt(key.strike), quoteDecOf(net, key.quote)) === undefined) revert("InvalidParams", fn);
         const at = net.tokens.get(lc(key.asset));
         if (!at || !net.tokens.get(lc(key.quote))) revert("BadToken", fn);
         const band = Number(args[2]);
@@ -1819,8 +1864,10 @@ function run(net: Net, me: Address, w: WriteCall) {
           settleCount: 0,
           windowEnd: 0n,
           lastPrice: 0n,
-          vwapNum: 0n,
-          vwapDen: 0n,
+          feeEscrow: 0n,
+          filledUnits: 0n,
+          repaidUnits: 0n,
+          fees: 0n,
           quoteBal: 0n,
           assetBal: 0n,
           volume: 0n,
@@ -1894,6 +1941,7 @@ function run(net: Net, me: Address, w: WriteCall) {
         const p = poolOrRevert(net, args[0], fn);
         if (p.status !== Status.Window || BigInt(blockAt(spec, t)) < p.windowEnd) revert("InvalidState", fn);
         p.status = Status.Closed;
+        splitFeeEscrow(net, p);
         dropOrders(net, p, () => true);
         return;
       }

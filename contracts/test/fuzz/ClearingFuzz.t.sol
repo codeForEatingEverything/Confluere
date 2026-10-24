@@ -5,7 +5,7 @@ import {Base} from "../utils/Base.sol";
 import {IConfluere} from "../../src/interfaces/IConfluere.sol";
 import {Settlement} from "../../src/libraries/Settlement.sol";
 import {Clearing} from "../../src/libraries/Clearing.sol";
-import {Grid, GridConfig} from "../../src/libraries/Grid.sol";
+import {Grid} from "../../src/libraries/Grid.sol";
 
 contract ClearingFuzzTest is Base {
     uint256[] internal sl;
@@ -22,7 +22,11 @@ contract ClearingFuzzTest is Base {
         assertEq(rSupply, _reference(), "volume == reference max crossing");
         assertEq(core.totalSupply(_c(pid)), rSupply, "C == R");
         assertEq(core.pool(pid).assetBal, rSupply);
-        assertEq(usdc.balanceOf(address(core)), _pendQ() + _escQ(pid) + core.pool(pid).quoteBal, "quote conserved");
+        assertEq(
+            usdc.balanceOf(address(core)),
+            _pendQ() + _escQ(pid) + core.pool(pid).quoteBal + core.pool(pid).feeEscrow,
+            "quote conserved"
+        );
     }
 
     function _placeRandom(bytes32 pid, uint256 seed) internal {
@@ -58,27 +62,22 @@ contract ClearingFuzzTest is Base {
 
     function _pendQ() internal view returns (uint256) {
         return _pend(address(usdc), alice) + _pend(address(usdc), dave) + _pend(address(usdc), bob)
-            + _pend(address(usdc), carol);
+            + _pend(address(usdc), carol) + _pend(address(usdc), treasury);
     }
 
     function _escQ(bytes32 pid) internal view returns (uint256 escQ) {
         for (uint64 id = 1; id < 20; ++id) {
-            (address owner, uint8 side,,, uint128 esc,,) = core.order(pid, id);
+            (address owner, uint8 side,,,, uint128 esc,,) = core.order(pid, id);
             if (owner != address(0) && side == 1) escQ += esc;
         }
     }
 
-    function testFuzz_feeNeverExceedsRepay(uint96 units, uint96 strike, uint96 vwap_, uint16 feeBps, uint8 dec)
-        public
-        pure
-    {
-        dec = uint8(bound(dec, 0, 30));
-        feeBps = uint16(bound(feeBps, 0, 10_000));
-        uint256 scale = 10 ** uint256(dec);
-        uint256 pay = Settlement.repayAmount(units, strike, scale);
-        uint256 fee = Settlement.fee(units, strike, vwap_, feeBps, scale);
-        assertLe(fee, pay);
-        if (vwap_ >= strike) assertEq(fee, 0);
+    function testFuzz_sellSplitNeverUnderflows(uint96 units, uint96 price, uint96 strike, uint8 dec) public pure {
+        uint256 scale = 10 ** uint256(bound(dec, 0, 30));
+        (uint256 gross, uint256 spread, uint256 trade, uint256 net) = Settlement.sellSplit(units, price, strike, scale);
+        assertEq(gross, spread + trade + net);
+        if (price >= strike) assertEq(spread, 0);
+        assertLe(spread, Settlement.spreadShare(units, strike, price, scale));
     }
 
     function testFuzz_roundingFavoursPool(uint96 units, uint96 price, uint8 dec) public pure {
@@ -96,12 +95,12 @@ contract ClearingFuzzTest is Base {
     }
 
     /// Solady's mulDiv equals plain arithmetic where the plain form cannot overflow: carries PlainMathHalmos over.
-    function testFuzz_soladyMatchesPlain(uint64 a, uint64 b, uint16 feeBps, uint64 c) public pure {
+    function testFuzz_soladyMatchesPlain(uint64 a, uint64 b, uint64 c) public pure {
         uint256 s = 1e18;
         assertEq(Clearing.quoteDown(a, b, s), uint256(a) * b / s);
         assertEq(Clearing.quoteUp(a, b, s), (uint256(a) * b + s - 1) / s);
         if (b > 0) assertEq(Clearing.unitsFor(a, b, s), uint256(a) * s / b);
-        if (c > b) assertEq(Settlement.fee(a, c, b, feeBps, s), uint256(a) * (c - b) * feeBps / (s * 10_000));
+        if (c > b) assertEq(Settlement.spreadShare(a, c, b, s), uint256(a) * (c - b) * 500 / (s * 10_000));
         assertEq(Settlement.repayAmount(a, c, s), (uint256(a) * c + s - 1) / s);
     }
 
@@ -112,12 +111,18 @@ contract ClearingFuzzTest is Base {
         assertLe(p, hi);
     }
 
-    function testFuzz_gridStrike(uint64 mantissa, uint8 zeros) public pure {
-        GridConfig memory g = GridConfig(0, 1, 1, 1, 2);
-        uint256 m_ = bound(mantissa, 1, 99);
-        uint256 z = bound(zeros, 0, 20);
-        assertTrue(Grid.isGridStrike(g, m_ * 10 ** z));
-        uint256 three = bound(mantissa, 101, 999);
-        if (three % 10 != 0) assertFalse(Grid.isGridStrike(g, three * 10 ** z));
+    /// After removing collisions (only the smallest index of a value counts) the grid is strictly increasing, and
+    /// every canonical index round-trips through indexOf.
+    function testFuzz_gridStrictlyIncreasingAfterDedup(int16 n, uint8 qdSeed) public pure {
+        uint8 qd = uint8(bound(qdSeed, 0, 24));
+        int256 i = bound(int256(n), -4094, 2400);
+        uint256 a = Grid.strikeAt(i, qd);
+        uint256 b = Grid.strikeAt(i + 1, qd);
+        assertGe(b, a);
+        if (a == 0 || a > type(uint96).max) return;
+        (int256 j, bool ok) = Grid.indexOf(a, qd);
+        assertTrue(ok);
+        assertLe(j, i);
+        assertEq(Grid.strikeAt(j, qd), a);
     }
 }

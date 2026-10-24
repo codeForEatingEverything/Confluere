@@ -92,7 +92,11 @@ export function slashEvidence(pools: PoolRow[], anchor: number, interval: number
   });
 }
 
-/** Graduation check over the last four expiries: every one must have volume >= threshold and no bad flag. */
-export function canGraduate(stats: { volume: bigint; bad: boolean }[], threshold: bigint, cycles = 4): boolean {
-  return threshold > 0n && stats.length >= cycles && stats.slice(0, cycles).every((s) => !s.bad && s.volume >= threshold);
+/**
+ * Graduation check over the last four expiries: every one must have no bad flag and reach the threshold. v0.8 counts
+ * treasury fees (trade fees + spread share, MarketStats.fees vs graduationFee); `basis: "volume"` is the pre-v0.8 rule.
+ */
+export function canGraduate(stats: { volume: bigint; fees?: bigint; bad: boolean }[], threshold: bigint, cycles = 4, basis: "fees" | "volume" = "fees"): boolean {
+  const v = (s: { volume: bigint; fees?: bigint }) => (basis === "fees" ? (s.fees ?? 0n) : s.volume);
+  return threshold > 0n && stats.length >= cycles && stats.slice(0, cycles).every((s) => !s.bad && v(s) >= threshold);
 }

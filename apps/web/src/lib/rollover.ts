@@ -43,6 +43,9 @@ export function defaultRolloverTarget(from: PoolRow, pools: PoolRow[]): PoolRow 
   return [...next].sort((a, b) => (dist(a) < dist(b) ? -1 : dist(a) > dist(b) ? 1 : 0))[0];
 }
 
-/** Most the borrower may have to add (unused part refunded to Withdraw): gap between old buy-back and the floor. */
-export const rolloverMaxTopUp = (from: PoolRow, units: bigint, minPrice: bigint, ttl: number) =>
-  rolloverTopUp(units, from.strike, minPrice, ttl, scaleOf(from.assetDecimals));
+/**
+ * Most the borrower may have to add (unused part refunded to Withdraw): gap between old buy-back and the floor, plus
+ * the seller's 0.015% trade fee and 5% spread share (at the new pool's buy-back price) at the floor (v0.8).
+ */
+export const rolloverMaxTopUp = (from: PoolRow, units: bigint, minPrice: bigint, ttl: number, to?: Pick<PoolRow, "strike">) =>
+  rolloverTopUp(units, from.strike, minPrice, ttl, scaleOf(from.assetDecimals), to?.strike ?? from.strike);

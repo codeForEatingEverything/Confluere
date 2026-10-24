@@ -98,7 +98,7 @@ contract PeripheryTest is Base {
         g.bind(core); // only the named binder, and only once
         weth.approve(address(core2), type(uint256).max);
         usdc.approve(address(core2), type(uint256).max);
-        bytes32 p2 = core2.createPool(_key(K, Kind.American, E1), 1000, 800);
+        bytes32 p2 = _createKey(IConfluere(address(core2)), _key(K, Kind.American, E1), _noOpts());
 
         vm.prank(alice);
         g.approvePause(p2, 10, 1);
@@ -133,11 +133,11 @@ contract PeripheryTest is Base {
         ps[1] = _params(BUY, ONE, 2000e6, 0, 3, core.findHint(pid, BUY, 2000e6));
         uint64[] memory ids = r.placeOrders(pids, ps);
         vm.stopPrank();
-        (address o0,,,,,,) = core.order(pid, ids[0]);
-        (address o1,,,, uint128 esc,,) = core.order(pid, ids[1]);
+        (address o0,,,,,,,) = core.order(pid, ids[0]);
+        (address o1,,,,, uint128 esc,,) = core.order(pid, ids[1]);
         assertEq(o0, dave);
         assertEq(o1, dave);
-        assertEq(esc, 2000e6 + 3);
+        assertEq(esc, 2000e6 + 300_000 + 6);
         assertEq(usdc.balanceOf(address(r)), 0);
     }
 
@@ -160,15 +160,16 @@ contract PeripheryTest is Base {
         uint256 u0 = usdc.balanceOf(bob);
         r.claimMany(pids);
         vm.stopPrank();
-        assertEq(usdc.balanceOf(bob) - u0, 2990e6);
+        assertEq(usdc.balanceOf(bob) - u0, K);
     }
 
     function test_vaultFactory() public {
-        VaultFactory f = new VaultFactory(core);
+        VaultFactory f = new VaultFactory(core, keccak256(type(Vault).creationCode));
         address[] memory as_ = new address[](1);
         as_[0] = address(weth);
         Vault v = f.create(
-            Vault.Strategy(address(usdc), as_, Kind.American, Vault.StrikeRule.HighestTraded, 2500, 9900),
+            type(Vault).creationCode,
+            Vault.Strategy(address(usdc), as_, Kind.American, Vault.StrikeRule.HighTier, 2500, 9900),
             "rvUSDC-ETH-High",
             "rvUSDC-ETH-High",
             bytes32(0)
@@ -176,5 +177,19 @@ contract PeripheryTest is Base {
         assertEq(f.vaultsLength(), 1);
         assertEq(v.asset(), address(usdc));
         assertEq(uint8(v.strikeRule()), 1);
+    }
+
+    function test_vaultFactory_rejectsOtherCode() public {
+        VaultFactory f = new VaultFactory(core, keccak256(type(Vault).creationCode));
+        address[] memory as_ = new address[](1);
+        as_[0] = address(weth);
+        vm.expectRevert(VaultFactory.WrongVaultCode.selector);
+        f.create(
+            hex"00",
+            Vault.Strategy(address(usdc), as_, Kind.American, Vault.StrikeRule.HighTier, 2500, 9900),
+            "x",
+            "x",
+            bytes32(0)
+        );
     }
 }

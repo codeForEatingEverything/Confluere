@@ -7,12 +7,14 @@ enum Kind {
     European
 }
 
-/// @notice Lifecycle of a pool. Closing is the segmented abandonment-auction phase after the window ends.
+/// @notice Lifecycle of a pool. Closing is the segmented abandonment-auction phase after the window ends; Selling is
+/// the autoSell sub-state after it, while the defaulted asset rests as a sell order in the next expiry's pool.
 enum Status {
     None,
     Open,
     Window,
     Closing,
+    Selling,
     Closed
 }
 
@@ -23,6 +25,8 @@ struct PoolKey {
     uint64 expiry; // timestamp on the expiry grid
     uint128 strike; // K: quote base units per 1 whole asset (10 ** assetDecimals units)
     Kind kind;
+    uint16 bandBps; // price band of the pool: 150, 800 or 1500
+    uint8 cadence; // batch interval = base interval * {1, 12, 48}[cadence]
 }
 
 /// @notice Pool id, C-Token id and R-Token id derivation.
@@ -38,6 +42,11 @@ library PoolKeyLib {
 
     function rId(bytes32 poolId) internal pure returns (uint256) {
         return uint256(poolId) | 1;
+    }
+
+    /// @notice A tier of a market at one expiry: strike, band and cadence packed into one key.
+    function tierKey(uint256 strike, uint16 bandBps, uint8 cadence) internal pure returns (uint256) {
+        return strike | uint256(bandBps) << 128 | uint256(cadence) << 144;
     }
 
     /// @notice A market groups every strike and expiry of one asset pair and kind. Graduation is tracked per market.
