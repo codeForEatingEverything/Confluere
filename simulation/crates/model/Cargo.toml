@@ -1,0 +1,9 @@
+[package]
+name = "confluere-model"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+alloy-primitives.workspace = true
+serde.workspace = true
