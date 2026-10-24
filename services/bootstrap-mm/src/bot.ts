@@ -11,7 +11,7 @@ import {
   type Deployment,
 } from "@confluere/sdk";
 import { erc20Abi, getAbiItem, maxUint256, parseEventLogs, type Account, type Address, type Hex, type PublicClient, type WalletClient } from "viem";
-import { committed, exitReason, quote, type PoolClass } from "./rules.js";
+import { committed, exitReason, marketDone, quote, type MarketExit, type PoolClass } from "./rules.js";
 
 export type Io = { pub: PublicClient; wallet: WalletClient; account: Account; d: Deployment; chainId: number };
 
@@ -21,6 +21,8 @@ export type BotConfig = {
   total: bigint;
   endAt: number;
   leadS: number;
+  /** Weekly quote volume per market at which the bot leaves that market (deploy parameter; 0 = seats only). */
+  exitWeeklyVolume?: bigint;
 };
 
 /** A bid of ours still resting in the book: its escrow counts against the cap until we know what it actually paid. */
@@ -112,14 +114,21 @@ export class Bot {
       this.state.startedAt = now;
       this.save();
     }
-    const why = exitReason({ now, startedAt: this.state.startedAt, endAt: this.cfg.endAt, marketsSeated: await this.marketsSeated() });
+    const markets = await this.marketExits(now);
+    const exitLine = this.cfg.exitWeeklyVolume ?? 0n;
+    const why = exitReason({ now, endAt: this.cfg.endAt, markets: [...markets.values()], exitWeeklyVolume: exitLine });
     if (why) {
       this.state.exited = why;
       this.save();
       this.log("bootstrap exit", { reason: why });
       return;
     }
-    for (const p of this.cfg.pools) await this.quotePool(p.id, p.cls, now);
+    for (const p of this.cfg.pools) {
+      const v = await this.poolView(p.id);
+      const m = markets.get(marketId(v.key.asset, v.key.quote, Number(v.key.kind)));
+      if (m && marketDone(m, exitLine)) continue; // this market has left bootstrap for good
+      await this.quotePool(p.id, p.cls, now);
+    }
   }
 
   /**
@@ -167,7 +176,8 @@ export class Bot {
     for (let lo = from; lo <= head; lo += chunk) {
       const hi = lo + chunk - 1n < head ? lo + chunk - 1n : head;
       const logs = await this.io.pub.getLogs({ address: this.core, event: orderFilled, args: { poolId: pid, orderId: id }, fromBlock: lo, toBlock: hi });
-      for (const l of logs) paid += l.args.quoteAmount ?? 0n;
+      // v0.8: a buyer pays the clearing cost plus its 0.015% trade fee; both count against the cap
+      for (const l of logs) paid += (l.args.quoteAmount ?? 0n) + (l.args.fee ?? 0n);
     }
     return paid;
   }
@@ -220,18 +230,35 @@ export class Bot {
   }
 
   /** Seat holder present for each quoted market (blueprint 9: seats replace the bootstrap MM). */
-  private async marketsSeated(): Promise<boolean[]> {
+  /**
+   * Per market: seat holder present, and quote volume over the last week (sum of marketStats(m, e).volume over the
+   * expiries e in (now - 7 days, next expiry]; one expiry on the weekly grid, seven or eight on the daily grid). The
+   * volume read is skipped when no exit line is set.
+   */
+  private async marketExits(now: number): Promise<Map<Hex, MarketExit>> {
     const reg = this.io.d.seatRegistry;
-    if (!reg) return [];
     const markets = new Set<Hex>();
     for (const p of this.cfg.pools) {
       const v = await this.poolView(p.id);
       markets.add(marketId(v.key.asset, v.key.quote, Number(v.key.kind)));
     }
-    const out: boolean[] = [];
+    const out = new Map<Hex, MarketExit>();
+    const { gridAnchor: anchor, gridPeriod: period } = this.io.d;
     for (const m of markets) {
-      const seat = await this.io.pub.readContract({ address: reg, abi: seatRegistryAbi, functionName: "seats", args: [m] });
-      out.push(seat[0] !== ZERO);
+      let seated = false;
+      if (reg) {
+        const seat = await this.io.pub.readContract({ address: reg, abi: seatRegistryAbi, functionName: "seats", args: [m] });
+        seated = seat[0] !== ZERO;
+      }
+      let weeklyVolume = 0n;
+      if ((this.cfg.exitWeeklyVolume ?? 0n) > 0n && period > 0) {
+        const next = anchor + (Math.floor((now - anchor) / period) + 1) * period;
+        for (let e = next; e > now - 7 * 86_400 && e >= anchor; e -= period) {
+          const st = await this.io.pub.readContract({ address: this.core, abi: confluereAbi, functionName: "marketStats", args: [m, BigInt(e)] });
+          weeklyVolume += BigInt(st.volume);
+        }
+      }
+      out.set(m, { seated, weeklyVolume });
     }
     return out;
   }
@@ -241,9 +268,9 @@ export class Bot {
     let units = 0n;
     while (id !== 0n) {
       const o = await this.io.pub.readContract({ address: this.core, abi: confluereAbi, functionName: "order", args: [pid, id] });
-      if (o[3] < limit) break;
-      if (o[0].toLowerCase() !== this.io.account.address.toLowerCase()) units += o[2];
-      id = o[6];
+      if (o[4] < limit) break;
+      if (o[0].toLowerCase() !== this.io.account.address.toLowerCase()) units += o[3];
+      id = o[7];
     }
     return units;
   }
