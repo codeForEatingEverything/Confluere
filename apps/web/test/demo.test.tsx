@@ -145,8 +145,40 @@ describe("demo mode: the same screens on sample data", () => {
     act(() => setChainChoice(10143));
     await waitFor(() => expect(result.current.chainId).toBe(10143));
     expect(result.current.deployment?.windowBlocks).toBe(24_000);
+    // Sepolia has a full sample network even before its live deploy (600-block window, the real Sepolia tokens)
+    act(() => setChainChoice(11155111));
+    await waitFor(() => expect(result.current.chainId).toBe(11155111));
+    expect(result.current.deployment?.windowBlocks).toBe(600);
+    expect(result.current.deployment?.pools?.native).toBe("0xfFf9976782d46CC05630D1f6eBAb18b2324d6B14");
     expect(w.switchChain).not.toHaveBeenCalled();
   });
+
+  it("Sepolia: every page has the sample set (WETH / USDC, wstETH / WETH, wstETH / USDC, ETH and USDC vaults, LP slots, positions)", async () => {
+    setChainChoice(11155111);
+    show(<HomeScreen />);
+    await waitFor(() => expect(screen.getByTestId("borrow-swap").textContent).toMatch(/Buy back at \d/), { timeout: 4000 });
+    cleanup();
+    show(<MarketsScreen />);
+    await waitFor(() => expect(document.body.textContent).toMatch(/wstETH \/ WETH/), { timeout: 4000 });
+    expect(document.body.textContent).toMatch(/WETH \/ USDC/);
+    expect(document.body.textContent).toMatch(/wstETH \/ USDC/);
+    cleanup();
+    show(<EarnScreen />);
+    await waitFor(() => expect(screen.getByTestId("vaults").textContent).toMatch(/ETH Pegged vault[\s\S]*USDC|USDC[\s\S]*ETH Pegged vault/), { timeout: 6000 });
+    cleanup();
+    show(<LpScreen />);
+    await waitFor(() => expect(screen.getByTestId("lp-pools").textContent).toMatch(/wstETH/), { timeout: 4000 });
+    cleanup();
+    show(<PortfolioScreen />);
+    await waitFor(() => expect(screen.getByTestId("loans").textContent).toMatch(/WETH|ETH/), { timeout: 8000 });
+    expect(screen.getByTestId("lending").textContent).toMatch(/ETH/);
+    // the reference price comes from the sample network's ETH / USD, labelled as the mainnet spot
+    const r = await appFetch("/api/ref/spot?symbol=ETH_USD");
+    const j = (await r.json()) as { price: number };
+    expect(j.price).toBeGreaterThan(1_500);
+    expect(j.price).toBeLessThan(4_000);
+    expect(liveCalls()).toBe(0);
+  }, 25_000);
 
   it("an action asks for a message signature, never a contract write or a network switch, and updates the sample state", async () => {
     w.sign.mockResolvedValue("0xsig");
