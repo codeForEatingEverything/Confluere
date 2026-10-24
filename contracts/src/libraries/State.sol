@@ -44,6 +44,7 @@ struct CoreState {
     mapping(bytes32 => mapping(uint64 => Order)) orders;
     mapping(bytes32 => mapping(uint64 => bytes32)) rolloverOld;
     mapping(bytes32 => mapping(uint64 => IConfluere.MarketStats)) stats;
+    mapping(bytes32 => mapping(uint64 => mapping(uint256 => uint256))) tierVolume; // market -> expiry -> tier -> quote
     mapping(address => mapping(address => uint256)) pending;
     mapping(address => mapping(bytes32 => uint256)) lockedR;
     mapping(bytes32 => bool) graduated;
