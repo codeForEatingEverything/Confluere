@@ -26,18 +26,16 @@ library OrderLogic {
         CoreState storage s,
         GridConfig memory g,
         PoolKey calldata key,
-        uint16 feeBps,
-        uint16 bandBps,
-        IConfluere.PoolOptions memory opts
+        IConfluere.PoolOptions calldata opts
     ) external returns (bytes32 poolId) {
         if (key.asset == key.quote || key.asset.code.length == 0 || key.quote.code.length == 0) {
             revert IConfluere.BadToken();
         }
-        if (feeBps != 1000 && feeBps != 1250 && feeBps != 1500) revert IConfluere.InvalidParams();
-        if (bandBps != 150 && bandBps != 800 && bandBps != 1500) revert IConfluere.InvalidParams();
+        uint16 band = key.bandBps;
+        if (band != 150 && band != 800 && band != 1500) revert IConfluere.InvalidParams();
         if (!Grid.isListableExpiry(g, key.expiry, block.timestamp)) revert IConfluere.InvalidParams();
         if (key.strike > type(uint96).max || !Grid.isGridStrike(g, key.strike)) revert IConfluere.InvalidParams();
-        if (opts.cadence > 2 || (opts.firstHi != 0 && opts.firstLo > opts.firstHi)) revert IConfluere.InvalidParams();
+        if (key.cadence > 2 || (opts.firstHi != 0 && opts.firstLo > opts.firstHi)) revert IConfluere.InvalidParams();
 
         poolId = PoolKeyLib.toId(key);
         PoolState storage ps = s.pools[poolId];
@@ -52,18 +50,16 @@ library OrderLogic {
         ps.marketId = PoolKeyLib.marketId(key.asset, key.quote, key.kind);
         ps.status = Status.Open;
         ps.assetDecimals = dec;
-        ps.feeBps = feeBps;
-        ps.bandBps = bandBps;
-        ps.cadence = opts.cadence;
+        ps.autoSell = opts.autoSell;
         ps.minFill = opts.minFill;
         ps.firstLo = opts.firstLo;
         ps.firstHi = opts.firstHi;
         uint256 iv = ps.interval(g.batchInterval);
         if (iv > g.period) revert IConfluere.InvalidParams();
         ps.lastSettledBatch = uint64((block.timestamp - g.anchor) / iv);
-        emit IConfluere.PoolCreated(poolId, key, feeBps, bandBps, ps.marketId);
-        if (opts.cadence != 0 || opts.minFill != 0 || opts.firstLo != 0 || opts.firstHi != 0) {
-            emit IConfluere.PoolOptionsSet(poolId, opts.cadence, opts.minFill, opts.firstLo, opts.firstHi);
+        emit IConfluere.PoolCreated(poolId, key, ps.marketId);
+        if (opts.minFill != 0 || opts.firstLo != 0 || opts.firstHi != 0 || opts.autoSell) {
+            emit IConfluere.PoolOptionsSet(poolId, opts.minFill, opts.firstLo, opts.firstHi, opts.autoSell);
         }
     }
 
@@ -195,7 +191,7 @@ library OrderLogic {
         // it is still "just before clearing"). Anyone can settle to lift the latter; while paused nothing can settle,
         // so that rule is off then.
         if (
-            ps.cadence != 0 && o.side != BID && o.deadline > ps.settleCount && ps.status == Status.Open
+            ps.key.cadence != 0 && o.side != BID && o.deadline > ps.settleCount && ps.status == Status.Open
                 && block.timestamp < ps.key.expiry
         ) {
             uint256 iv = ps.interval(pr.batchInterval);

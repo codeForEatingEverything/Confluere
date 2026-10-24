@@ -225,7 +225,7 @@ library ClearingLogic {
             ps.bandFailures = 0;
             return false;
         }
-        if (Clearing.withinBand(price, base, Clearing.widenedBand(ps.bandBps, f))) {
+        if (Clearing.withinBand(price, base, Clearing.widenedBand(ps.key.bandBps, f))) {
             ps.bandBase = SafeCast.toUint96(price);
             ps.bandFailures = 0;
             return true;
