@@ -15,8 +15,8 @@ library WindowLogic {
     using PoolKeyLib for bytes32;
 
     /// @notice Pay K per whole asset (rounded up) to buy back `units`. American: any time until the window ends.
-    /// European: only inside the window. The spread share comes out of what is paid.
-    function repay(CoreState storage s, Params memory pr, bytes32 poolId, uint96 units) external {
+    /// European: only inside the window. All of K goes to C holders; the spread share was taken at clearing.
+    function repay(CoreState storage s, bytes32 poolId, uint96 units) external {
         PoolState storage ps = s.pool(poolId);
         bool early = ps.key.kind == Kind.American && ps.status == Status.Open && block.timestamp < ps.key.expiry;
         if (!(early || s.windowOpen(ps))) {
@@ -25,22 +25,22 @@ library WindowLogic {
         if (units == 0) revert IConfluere.InvalidParams();
         if (s.freeR(msg.sender, poolId) < units) revert IConfluere.Locked();
 
-        uint256 sc = ps.scale();
-        uint256 pay = Settlement.repayAmount(units, ps.key.strike, sc);
-        uint256 fee = Settlement.fee(units, ps.key.strike, ps.vwap(), ps.feeBps, sc);
+        uint256 pay = Settlement.repayAmount(units, ps.key.strike, ps.scale());
         s.burn(msg.sender, poolId.rId(), units);
-        ps.quoteBal += pay - fee;
+        ps.quoteBal += pay;
         ps.assetBal -= units;
-        s.pending[ps.key.quote][pr.treasury] += fee;
-        if (fee != 0) s.marketFees[ps.marketId] += fee;
+        ps.repaidUnits += units;
         CoreLib.pullExact(ps.key.quote, pay);
         CoreLib.push(ps.key.asset, msg.sender, units);
-        emit IConfluere.Repaid(poolId, msg.sender, units, pay, fee);
+        emit IConfluere.Repaid(poolId, msg.sender, units, pay);
     }
 
     /// @notice Segmented close: each call fills at most `maxBids` bids from the top, then refunds them.
     /// Unrepaid units nobody bid on stay in the pool for C holders (default). Returns true once Closed.
-    function closeWindow(CoreState storage s, bytes32 poolId, uint256 maxBids) external returns (bool done) {
+    function closeWindow(CoreState storage s, Params memory pr, bytes32 poolId, uint256 maxBids)
+        external
+        returns (bool done)
+    {
         PoolState storage ps = s.pool(poolId);
         if (ps.status == Status.Window) {
             if (block.number < ps.windowEnd) revert IConfluere.InvalidState();
@@ -56,10 +56,27 @@ library WindowLogic {
             s.removeWithRefund(poolId, ps, id, CoreLib.RM_BID_CLOSED);
         }
         if (bk.head == 0) {
+            _splitEscrow(s, pr, ps, poolId);
             ps.status = Status.Closed;
             emit IConfluere.WindowClosed(poolId, ps.quoteBal, ps.assetBal, ps.surplusBal);
             return true;
         }
+    }
+
+    /// @dev The spread escrow splits once, by the fraction of filled units whose K was paid in full: that part goes
+    /// to the treasury (and counts toward graduation), the defaulted part to C holders.
+    function _splitEscrow(CoreState storage s, Params memory pr, PoolState storage ps, bytes32 poolId) private {
+        uint256 esc = ps.feeEscrow;
+        if (esc == 0) return;
+        uint256 toT = Settlement.feeSplit(esc, ps.repaidUnits, ps.filledUnits);
+        ps.feeEscrow = 0;
+        ps.quoteBal += esc - toT;
+        if (toT != 0) {
+            s.pending[ps.key.quote][pr.treasury] += toT;
+            s.marketFees[ps.marketId] += toT;
+            CoreLib.addFees(s, ps, toT);
+        }
+        emit IConfluere.FeeEscrowSplit(poolId, toT, esc - toT, ps.repaidUnits, ps.filledUnits);
     }
 
     function _fillBid(CoreState storage s, PoolState storage ps, bytes32 poolId, uint64 id) private {
@@ -71,6 +88,7 @@ library WindowLogic {
         uint256 cost = Clearing.quoteUp(f, ps.key.strike + o.limit, sc);
         uint256 kPart = Clearing.quoteUp(f, ps.key.strike, sc);
         ps.closeRemaining = rem - f;
+        ps.repaidUnits += f;
         ps.quoteBal += kPart;
         ps.surplusBal += cost - kPart;
         ps.assetBal -= f;

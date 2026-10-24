@@ -8,6 +8,7 @@ import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {IERC20Metadata} from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
 import {Order, SELL, BUY, NC_SELL, NC_BUY, BID, FLAG_ROLLOVER, FLAG_LOCKED} from "../OrderSet.sol";
 import {Clearing} from "../Clearing.sol";
+import {Settlement} from "../Settlement.sol";
 import {SafeCast} from "@openzeppelin/contracts/utils/math/SafeCast.sol";
 import {CoreState, PoolState, Params, CoreLib} from "../State.sol";
 
@@ -104,8 +105,8 @@ library OrderLogic {
         } else if (p.side == BUY) {
             if (p.units == 0 || p.limit == 0 || p.budget != 0) revert IConfluere.InvalidParams();
             s.requireMinNotional(ps, p.units);
-            // Escrow covers the full order at its limit plus 1 wei of rounding per batch it can trade in.
-            uint256 esc = Clearing.quoteUp(p.units, p.limit, ps.scale()) + p.ttl;
+            // Escrow covers the full order at its limit, its trade fee, and 2 wei of rounding per batch it can trade in.
+            uint256 esc = Settlement.buyEscrow(p.units, p.limit, ps.scale(), p.ttl);
             o.units = p.units;
             o.limit = p.limit;
             o.escrow = SafeCast.toUint128(esc);
@@ -147,9 +148,13 @@ library OrderLogic {
         }
         if (a.units == 0 || a.minPrice == 0 || a.ttl == 0 || a.ttl > MAX_TTL) revert IConfluere.InvalidParams();
 
-        // Each fill needs at most f*(K - minPrice)/scale + 2 wei of top-up (one wei of rounding on each leg).
+        // The top-up is largest when the new pool clears at minPrice: K - minPrice per unit, plus the seller's trade
+        // fee and spread share at minPrice, plus rounding (one wei on each leg and on each fee) per batch.
+        uint256 sc = op.scale();
         uint256 k = op.key.strike;
-        uint256 need = (k > a.minPrice ? Clearing.quoteUp(a.units, k - a.minPrice, op.scale()) : 0) + 2 * uint256(a.ttl);
+        uint256 need = (k > a.minPrice ? Clearing.quoteUp(a.units, k - a.minPrice, sc) : 0)
+            + Settlement.tradeFee(Clearing.quoteUp(a.units, a.minPrice, sc))
+            + Settlement.spreadShare(a.units, np.key.strike, a.minPrice, sc) + 4 * uint256(a.ttl);
         if (a.maxTopUp < need) revert IConfluere.InvalidParams();
 
         s.requireMinNotional(op, a.units);

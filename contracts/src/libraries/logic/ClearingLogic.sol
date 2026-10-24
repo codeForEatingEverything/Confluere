@@ -11,10 +11,13 @@ import {CoreState, PoolState, Params, CoreLib} from "../State.sol";
 
 /// @notice Uniform-price batch clearing. Linked library; runs in the core's context.
 ///
-/// Pass 1 (read-only) walks both competitive books from the top to find the crossing volume Q and the marginal
-/// pair; P* is their midpoint. If P* is inside the band, non-competitive orders then trade at P* against each other
-/// and against competitive leftovers still willing at P*, capped at 50% of Q. Pass 2 applies the fills in book order,
-/// skipping exactly the orders pass 1 skipped, so the allocations match.
+/// Pass 1 (read-only) crosses the competitive books alone: volume q0 and price P0 (midpoint of the marginal pair).
+/// If P0 is inside the band, non-competitive buy demand enters the price once (blueprint 4.2): d = min(NC budget at P0,
+/// 50% of q0) units of any-price demand take the cheapest sells first, the competitive books recross on what is left,
+/// and P* is the midpoint of the marginal competitive pair of that recross. When d would leave no competitive buy
+/// filled there is no price from NC demand and the competitive-only result stands. NC sells never price. Then
+/// non-competitive sells trade at P* against competitive leftovers and remaining NC budget, inside the same cap.
+/// Pass 2 applies the fills in book order, skipping exactly the orders pass 1 skipped, so the allocations match.
 library ClearingLogic {
     using CoreLib for CoreState;
     using CoreLib for PoolState;
@@ -33,6 +36,8 @@ library ClearingLogic {
         address treasury;
         address quote;
         uint256 strike;
+        uint256 spread;
+        uint256 trade;
     }
 
     struct Cursor {
@@ -42,6 +47,8 @@ library ClearingLogic {
 
     struct Plan {
         uint256 q;
+        uint256 ncX; // NC buy units priced in by the recross
+        uint256 q0; // competitive-only crossing volume, the base of the 50% cap
         uint256 sellC2;
         uint256 buyC2;
         uint256 sellNC;
@@ -70,15 +77,20 @@ library ClearingLogic {
         Plan memory pl = _plan(s, ps, bt);
         uint256 total;
         if (pl.q != 0) {
-            _fillSorted(s, ps, bt, SELL, pl.q + pl.sellC2);
+            _fillSorted(s, ps, bt, SELL, pl.q + pl.ncX + pl.sellC2);
             _fillSorted(s, ps, bt, BUY, pl.q + pl.buyC2);
             if (pl.sellNC != 0) _fillQueue(s, ps, bt, NC_SELL, pl.sellNC);
-            if (pl.buyNC != 0) _fillQueue(s, ps, bt, NC_BUY, pl.buyNC);
+            if (pl.ncX + pl.buyNC != 0) _fillQueue(s, ps, bt, NC_BUY, pl.ncX + pl.buyNC);
 
-            total = pl.q + pl.sellNC + pl.sellC2;
+            total = pl.q + pl.ncX + pl.sellNC + pl.sellC2;
             ps.quoteBal += bt.paid - bt.received;
-            ps.sumPU += bt.price * total;
-            ps.sumUnits += total;
+            ps.feeEscrow += bt.spread;
+            ps.filledUnits += total;
+            if (bt.trade != 0) {
+                s.pending[bt.quote][bt.treasury] += bt.trade;
+                s.marketFees[ps.marketId] += bt.trade;
+                CoreLib.addFees(s, ps, bt.trade);
+            }
             IConfluere.MarketStats storage st = s.stats[ps.marketId][ps.key.expiry];
             // Saturating: the counter only feeds graduation and must never block clearing.
             uint256 vol = uint256(st.volume) + Clearing.quoteDown(total, bt.price, bt.scale);
@@ -87,39 +99,79 @@ library ClearingLogic {
             if (st.minStrike == 0 || k < st.minStrike) st.minStrike = k;
             if (k > st.maxStrike) st.maxStrike = k;
         }
-        emit IConfluere.BatchSettled(poolId, bt.sc, bt.price, pl.q, total - pl.q);
+        emit IConfluere.BatchSettled(poolId, bt.sc, bt.price, pl.q, total - pl.q, bt.spread, bt.trade, pl.q0);
     }
 
     function _plan(CoreState storage s, PoolState storage ps, Batch memory bt) private returns (Plan memory pl) {
         Cursor memory cs;
         Cursor memory cb;
-        (pl.q, cs, cb) = _cross(s, bt);
+        (pl.q, cs, cb, bt.price) = _cross(s, bt, 0);
         if (pl.q == 0) return pl;
         // Minimum fill and first-auction bounds: too little competitive volume, or a first price outside the creator's
         // range, means the batch does not trade and every order rolls to the next batch.
         if (
             pl.q < ps.minFill
-                || (ps.sumUnits == 0 && (bt.price < ps.firstLo || (ps.firstHi != 0 && bt.price > ps.firstHi)))
+                || (ps.filledUnits == 0 && (bt.price < ps.firstLo || (ps.firstHi != 0 && bt.price > ps.firstHi)))
         ) {
             pl.q = 0;
             bt.price = 0;
             return pl;
         }
+        pl.q0 = pl.q;
+        if (_bandAllowsNc(s, ps, bt.price)) {
+            uint256 cap = pl.q * NC_SHARE_BPS / Clearing.BPS;
+            _priceNc(s, bt, pl, cs, cb, cap);
+            if (pl.ncX != 0) ps.bandBase = SafeCast.toUint96(bt.price);
+            _sizeNc(s, bt, pl, cs, cb, cap);
+        }
         ps.lastClearingPrice = SafeCast.toUint96(bt.price);
-        if (_bandAllowsNc(s, ps, bt.price)) _sizeNc(s, bt, pl, cs, cb);
     }
 
-    /// @dev Pass 1: crossing volume and P*. Leaves the cursors where competitive matching stopped.
-    function _cross(CoreState storage s, Batch memory bt)
+    /// @dev Non-competitive buy demand in the price: one recross with d = min(NC units at P0, cap) any-price units
+    /// ahead of the competitive buys. Adopted only if a competitive buy still fills and some NC demand is eligible at
+    /// the new price; the units taken are what that demand affords at the new price, never more than d.
+    function _priceNc(
+        CoreState storage s,
+        Batch memory bt,
+        Plan memory pl,
+        Cursor memory cs,
+        Cursor memory cb,
+        uint256 cap
+    ) private view {
+        uint256 d = _sumQueue(s, bt.poolId, NC_BUY, bt, cap);
+        if (d > cap) d = cap;
+        if (d == 0) return;
+        (uint256 q1, Cursor memory cs1, Cursor memory cb1, uint256 p1) = _cross(s, bt, d);
+        if (q1 == 0) return;
+        uint256 p0 = bt.price;
+        bt.price = p1;
+        uint256 x = _sumQueue(s, bt.poolId, NC_BUY, bt, d);
+        if (x == 0) {
+            bt.price = p0;
+            return;
+        }
+        pl.q = q1;
+        pl.ncX = x < d ? x : d;
+        (cs.id, cs.rem, cb.id, cb.rem) = (cs1.id, cs1.rem, cb1.id, cb1.rem);
+    }
+
+    /// @dev Pass 1: crossing volume and the midpoint of the marginal competitive pair, after `pre` units of
+    /// any-price demand have taken the cheapest sells. Leaves the cursors where competitive matching stopped.
+    function _cross(CoreState storage s, Batch memory bt, uint256 pre)
         private
         view
-        returns (uint256 q, Cursor memory cs, Cursor memory cb)
+        returns (uint256 q, Cursor memory cs, Cursor memory cb, uint256 price)
     {
-        bytes32 poolId = bt.poolId;
-        mapping(uint64 => Order) storage os = s.orders[poolId];
-        cs = _firstLive(s, poolId, s.books[poolId][SELL].head, bt.sc);
-        cb = _firstLive(s, poolId, s.books[poolId][BUY].head, bt.sc);
-        uint256 lastS;
+        mapping(uint64 => Order) storage os = s.orders[bt.poolId];
+        cs = _firstLive(s, bt.poolId, s.books[bt.poolId][SELL].head, bt.sc);
+        cb = _firstLive(s, bt.poolId, s.books[bt.poolId][BUY].head, bt.sc);
+        while (pre != 0 && cs.id != 0) {
+            uint256 t = cs.rem < pre ? cs.rem : pre;
+            pre -= t;
+            cs.rem -= t;
+            if (cs.rem == 0) cs = _firstLive(s, bt.poolId, os[cs.id].next, bt.sc);
+        }
+        if (pre != 0) return (0, cs, cb, 0);
         uint256 lastB;
         while (cs.id != 0 && cb.id != 0) {
             uint96 sl = os[cs.id].limit;
@@ -127,31 +179,36 @@ library ClearingLogic {
             if (sl > bl) break;
             uint256 m = cs.rem < cb.rem ? cs.rem : cb.rem;
             q += m;
-            lastS = sl;
+            price = sl; // marginal sell; becomes the midpoint below
             lastB = bl;
             cs.rem -= m;
             cb.rem -= m;
-            if (cs.rem == 0) cs = _firstLive(s, poolId, os[cs.id].next, bt.sc);
-            if (cb.rem == 0) cb = _firstLive(s, poolId, os[cb.id].next, bt.sc);
+            if (cs.rem == 0) cs = _firstLive(s, bt.poolId, os[cs.id].next, bt.sc);
+            if (cb.rem == 0) cb = _firstLive(s, bt.poolId, os[cb.id].next, bt.sc);
         }
-        if (q != 0) bt.price = Clearing.midpoint(lastS, lastB);
+        if (q != 0) price = Clearing.midpoint(price, lastB);
     }
 
-    /// @dev Stage 2 sizing: non-competitive volume at P*, capped at 50% of the competitive volume.
-    function _sizeNc(CoreState storage s, Batch memory bt, Plan memory pl, Cursor memory cs, Cursor memory cb)
-        private
-        view
-    {
-        uint256 cap = pl.q * NC_SHARE_BPS / Clearing.BPS;
-        if (cap == 0) return;
-        uint256 ncS = _sumQueue(s, bt.poolId, NC_SELL, bt, cap);
+    /// @dev Stage 2 sizing: non-competitive volume at P*, inside what is left of the 50% cap after the recross.
+    function _sizeNc(
+        CoreState storage s,
+        Batch memory bt,
+        Plan memory pl,
+        Cursor memory cs,
+        Cursor memory cb,
+        uint256 cap
+    ) private view {
+        if (cap <= pl.ncX) return;
+        uint256 cap2 = cap - pl.ncX;
+        uint256 ncS = _sumQueue(s, bt.poolId, NC_SELL, bt, cap2);
         uint256 ncB = _sumQueue(s, bt.poolId, NC_BUY, bt, cap);
-        uint256 cSL = _sumLeftover(s, bt.poolId, SELL, cs, bt, cap);
+        ncB = ncB > pl.ncX ? ncB - pl.ncX : 0;
+        uint256 cSL = _sumLeftover(s, bt.poolId, SELL, cs, bt, cap2);
         // By construction at most one competitive side still has orders willing at P*; never match comp vs comp.
-        uint256 cBL = cSL != 0 ? 0 : _sumLeftover(s, bt.poolId, BUY, cb, bt, cap);
+        uint256 cBL = cSL != 0 ? 0 : _sumLeftover(s, bt.poolId, BUY, cb, bt, cap2);
         uint256 m2 = ncS + cSL;
         if (ncB + cBL < m2) m2 = ncB + cBL;
-        if (cap < m2) m2 = cap;
+        if (cap2 < m2) m2 = cap2;
         pl.sellNC = ncS < m2 ? ncS : m2;
         pl.sellC2 = m2 - pl.sellNC;
         pl.buyNC = ncB < m2 ? ncB : m2;
@@ -209,7 +266,7 @@ library ClearingLogic {
             if (o.deadline <= bt.sc) {
                 s.removeWithRefund(bt.poolId, ps, id, CoreLib.RM_EXPIRED);
             } else if (_ncEligible(o, side, bt)) {
-                uint256 avail = side == NC_SELL ? o.units : Clearing.unitsFor(o.escrow, bt.price, bt.scale);
+                uint256 avail = side == NC_SELL ? o.units : Settlement.ncUnits(o.escrow, bt.price, bt.scale);
                 uint256 f = avail < target ? avail : target;
                 if (f != 0) {
                     target -= f;
@@ -229,17 +286,15 @@ library ClearingLogic {
         Order storage o,
         uint256 f
     ) private {
-        uint256 proceeds = Clearing.quoteDown(f, bt.price, bt.scale);
-        bt.received += proceeds;
+        uint256 net = _sellProceeds(bt, id, f);
         address owner = o.owner;
         ps.assetBal += f;
         if (o.flags & FLAG_ROLLOVER != 0) {
-            _settleRollover(s, bt, id, o, f, proceeds);
+            _settleRollover(s, bt, id, o, f, net);
         } else {
-            s.pending[ps.key.quote][owner] += proceeds;
+            s.pending[ps.key.quote][owner] += net;
         }
         s.mint(owner, bt.poolId.rId(), f);
-        emit IConfluere.OrderFilled(bt.poolId, id, f, proceeds);
         uint96 rem = o.units - uint96(f);
         if (rem == 0) {
             o.units = 0;
@@ -249,7 +304,20 @@ library ClearingLogic {
         }
     }
 
-    /// @dev New-pool proceeds pay K (less the spread share) into the old pool; the pre-funded top-up covers any gap.
+    /// @dev Seller side of a fill: gross at P*, less the spread share (to the pool's escrow) and the trade fee.
+    function _sellProceeds(Batch memory bt, uint64 id, uint256 f) private returns (uint256 net) {
+        uint256 gross;
+        uint256 spread;
+        uint256 trade;
+        (gross, spread, trade, net) = Settlement.sellSplit(f, bt.price, bt.strike, bt.scale);
+        bt.received += gross;
+        bt.spread += spread;
+        bt.trade += trade;
+        emit IConfluere.OrderFilled(bt.poolId, id, f, gross, spread + trade);
+    }
+
+    /// @dev New-pool net proceeds pay K into the old pool (the old pool counts these units as repaid); the pre-funded
+    /// top-up covers any gap.
     /// The asset moves from the old pool to the new one and the old R is burned; the caller mints the new R.
     function _settleRollover(
         CoreState storage s,
@@ -262,7 +330,7 @@ library ClearingLogic {
         bytes32 oldId = s.rolloverOld[bt.poolId][id];
         PoolState storage op = s.pools[oldId];
         address owner = o.owner;
-        (uint256 pay, uint256 fee) = _repayTerms(op, f);
+        uint256 pay = Settlement.repayAmount(f, op.key.strike, op.scale());
         uint256 topUp;
         if (proceeds >= pay) {
             s.pending[bt.quote][owner] += proceeds - pay;
@@ -270,30 +338,25 @@ library ClearingLogic {
             topUp = pay - proceeds;
             o.escrow -= SafeCast.toUint128(topUp);
         }
-        s.pending[bt.quote][bt.treasury] += fee;
-        if (fee != 0) s.marketFees[op.marketId] += fee;
-        op.quoteBal += pay - fee;
+        op.quoteBal += pay;
+        op.repaidUnits += f;
         op.assetBal -= f;
         s.lockedR[owner][oldId] -= f;
         s.burn(owner, oldId.rId(), f);
         emit IConfluere.RolledOver(oldId, bt.poolId, owner, f, topUp);
     }
 
-    function _repayTerms(PoolState storage op, uint256 f) private view returns (uint256 pay, uint256 fee) {
-        uint256 sc = op.scale();
-        pay = Settlement.repayAmount(f, op.key.strike, sc);
-        fee = Settlement.fee(f, op.key.strike, op.vwap(), op.feeBps, sc);
-    }
-
     function _fillBuy(CoreState storage s, PoolState storage ps, Batch memory bt, uint64 id, Order storage o, uint256 f)
         private
     {
         uint256 cost = Clearing.quoteUp(f, bt.price, bt.scale);
+        uint256 fee = Settlement.tradeFee(cost);
         bt.paid += cost;
-        uint256 esc = o.escrow - cost;
+        bt.trade += fee;
+        uint256 esc = o.escrow - cost - fee;
         address owner = o.owner;
         s.mint(owner, bt.poolId.cId(), f);
-        emit IConfluere.OrderFilled(bt.poolId, id, f, cost);
+        emit IConfluere.OrderFilled(bt.poolId, id, f, cost, fee);
         if (o.side == BUY) {
             uint256 rem = o.units - f;
             if (rem == 0) {
@@ -304,7 +367,7 @@ library ClearingLogic {
             }
             // Keep exactly what the remainder can still cost, plus the per-batch rounding reserve.
             uint256 left = o.deadline > bt.sc + 1 ? o.deadline - bt.sc - 1 : 0;
-            uint256 req = Clearing.quoteUp(rem, o.limit, bt.scale) + left;
+            uint256 req = Settlement.buyEscrow(rem, o.limit, bt.scale, left);
             if (esc > req) {
                 s.pending[ps.key.quote][owner] += esc - req;
                 esc = req;
@@ -382,7 +445,7 @@ library ClearingLogic {
         while (id != 0 && sum < cap) {
             Order storage o = os[id];
             if (o.deadline > bt.sc && _ncEligible(o, side, bt)) {
-                sum += side == NC_SELL ? o.units : Clearing.unitsFor(o.escrow, bt.price, bt.scale);
+                sum += side == NC_SELL ? o.units : Settlement.ncUnits(o.escrow, bt.price, bt.scale);
             }
             id = o.next;
         }
