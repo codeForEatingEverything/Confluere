@@ -10,12 +10,13 @@ import {Order, SELL, BUY, NC_SELL, NC_BUY, BID, FLAG_ROLLOVER, FLAG_LOCKED} from
 import {Clearing} from "../Clearing.sol";
 import {Settlement} from "../Settlement.sol";
 import {SafeCast} from "@openzeppelin/contracts/utils/math/SafeCast.sol";
-import {CoreState, PoolState, Params, CoreLib} from "../State.sol";
+import {CoreState, PoolState, Params, ParamsLib, CoreLib} from "../State.sol";
 
 /// @notice Order entry, cancellation and abandonment-auction bids. Linked library; runs in the core's context.
 library OrderLogic {
     using CoreLib for CoreState;
     using CoreLib for PoolState;
+    using ParamsLib for Params;
     using PoolKeyLib for bytes32;
 
     uint16 internal constant MAX_TTL = 1000;
@@ -197,9 +198,9 @@ library OrderLogic {
             ps.key.cadence != 0 && o.side != BID && o.deadline > ps.settleCount && ps.status == Status.Open
                 && block.timestamp < ps.key.expiry
         ) {
-            uint256 iv = ps.interval(pr.batchInterval);
-            uint256 cur = (block.timestamp - pr.anchor) / iv;
-            uint256 next = pr.anchor + (cur + 1) * iv;
+            uint256 iv = ps.interval(pr.batchInterval());
+            uint256 cur = (block.timestamp - pr.anchor()) / iv;
+            uint256 next = pr.anchor() + (cur + 1) * iv;
             bool due = cur > ps.lastSettledBatch && block.number >= ps.pausedUntil;
             if (due || next - block.timestamp <= iv / 12) revert IConfluere.InvalidState();
         }

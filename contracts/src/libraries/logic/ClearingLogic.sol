@@ -7,7 +7,7 @@ import {Order, SELL, BUY, NC_SELL, NC_BUY, FLAG_ROLLOVER} from "../OrderSet.sol"
 import {Clearing} from "../Clearing.sol";
 import {SafeCast} from "@openzeppelin/contracts/utils/math/SafeCast.sol";
 import {Settlement} from "../Settlement.sol";
-import {CoreState, PoolState, Params, CoreLib} from "../State.sol";
+import {CoreState, PoolState, Params, ParamsLib, CoreLib} from "../State.sol";
 
 /// @notice Uniform-price batch clearing. Linked library; runs in the core's context.
 ///
@@ -21,6 +21,7 @@ import {CoreState, PoolState, Params, CoreLib} from "../State.sol";
 library ClearingLogic {
     using CoreLib for CoreState;
     using CoreLib for PoolState;
+    using ParamsLib for Params;
     using PoolKeyLib for bytes32;
 
     uint256 internal constant NC_SHARE_BPS = 5000;
@@ -59,8 +60,8 @@ library ClearingLogic {
     function settleBatch(CoreState storage s, Params memory pr, bytes32 poolId) external {
         PoolState storage ps = s.pool(poolId);
         ps.requireTrading();
-        uint256 iv = ps.interval(pr.batchInterval);
-        uint64 batchIndex = uint64((block.timestamp - pr.anchor) / iv);
+        uint256 iv = ps.interval(pr.batchInterval());
+        uint64 batchIndex = uint64((block.timestamp - pr.anchor()) / iv);
         if (batchIndex <= ps.lastSettledBatch) revert IConfluere.BatchNotReady();
         ps.lastSettledBatch = batchIndex;
 
@@ -68,10 +69,10 @@ library ClearingLogic {
         bt.poolId = poolId;
         bt.scale = ps.scale();
         bt.sc = ps.settleCount;
-        bt.treasury = pr.treasury;
+        bt.treasury = pr.treasury();
         bt.quote = ps.key.quote;
         bt.strike = ps.key.strike;
-        bt.nextBoundary = pr.anchor + (uint256(batchIndex) + 1) * iv;
+        bt.nextBoundary = pr.anchor() + (uint256(batchIndex) + 1) * iv;
         ps.settleCount = bt.sc + 1;
 
         for (uint8 side; side <= NC_BUY; ++side) {
