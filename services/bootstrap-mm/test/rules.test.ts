@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { classOf, exitReason, isPoolClass, quote, RUN_S } from "../src/rules.js";
+import { classOf, exitReason, isPoolClass, marketDone, quote } from "../src/rules.js";
 
 const base = {
   cls: "main" as const,
@@ -58,21 +58,26 @@ describe("bootstrap bands by pair", () => {
   });
 });
 
-describe("bootstrap exit", () => {
-  const e = { now: 1_000, startedAt: 1_000, endAt: 0, marketsSeated: [true, false] };
-  it("keeps running inside eight weeks while a market has no seat holder", () => {
+describe("bootstrap exit (v0.8: per market, seat or weekly volume)", () => {
+  const m = (seated: boolean, weeklyVolume = 0n) => ({ seated, weeklyVolume });
+  const e = { now: 1_000, endAt: 0, markets: [m(true), m(false)], exitWeeklyVolume: 0n };
+  it("keeps running while a market has no seat holder and no exit line, however long it ran", () => {
     expect(exitReason(e)).toBeNull();
-    expect(exitReason({ ...e, now: 1_000 + RUN_S - 1 })).toBeNull();
-  });
-  it("exits after eight weeks from the first start, whatever END_AT says", () => {
-    expect(RUN_S).toBe(56 * 86_400);
-    expect(exitReason({ ...e, now: 1_000 + RUN_S, endAt: 1_000 + 2 * RUN_S })).toBe("eight weeks elapsed");
+    expect(exitReason({ ...e, now: 1_000 + 100 * 86_400 })).toBeNull();
   });
   it("exits once every market has a seat holder", () => {
-    expect(exitReason({ ...e, marketsSeated: [true, true] })).toBe("seats cover every market");
+    expect(exitReason({ ...e, markets: [m(true), m(true)] })).toBe("seats cover every market");
   });
-  it("no registry (no markets known) does not count as covered", () => {
-    expect(exitReason({ ...e, marketsSeated: [] })).toBeNull();
+  it("a market leaves once its weekly volume reaches the exit line", () => {
+    expect(marketDone(m(false, 99n), 100n)).toBe(false);
+    expect(marketDone(m(false, 100n), 100n)).toBe(true);
+    expect(marketDone(m(false, 10n ** 30n), 0n)).toBe(false); // no line: seats only
+    expect(exitReason({ ...e, markets: [m(true), m(false, 100n)], exitWeeklyVolume: 100n })).toBe(
+      "every market seated or past the weekly volume line",
+    );
+  });
+  it("no markets known does not count as covered", () => {
+    expect(exitReason({ ...e, markets: [] })).toBeNull();
   });
   it("an earlier END_AT still applies", () => {
     expect(exitReason({ ...e, endAt: 900 })).toBe("END_AT reached");
