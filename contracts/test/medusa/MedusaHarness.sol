@@ -176,7 +176,7 @@ contract MedusaHarness {
         for (uint256 i; i < 2; ++i) {
             IConfluere.PoolView memory v = core.pool(pools[i]);
             pa += v.assetBal;
-            pq += v.quoteBal + v.surplusBal;
+            pq += v.quoteBal + v.surplusBal + v.feeEscrow;
         }
         uint256 penA = core.pending(address(weth), TREASURY);
         uint256 penQ = core.pending(address(usdc), TREASURY);
