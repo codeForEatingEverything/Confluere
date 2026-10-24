@@ -209,7 +209,7 @@ function VaultBody({ v, quote, asset, role, native, wrapped = false }: { v: Vaul
             }
           />
           {rw.picker}
-          <p className="text-caption text-ink-3">Withdrawals are requested now and paid at the end of this period ({periodEnd}), first come first served. If the vault&apos;s funds are out on loan, they are paid when those loans reach maturity.</p>
+          <p className="text-caption text-ink-3">Withdrawals are requested now and paid at the end of this period ({periodEnd}), first come first served. If the vault&apos;s funds are out on loan, they are paid when those loans reach maturity. You are paid in the loan token: the vault lends only into markets that auto-sell defaulted collateral in the next maturity's rounds; any small part that does not sell is claimable by share.</p>
           {me && me.pendingRedeem > 0n && <StatusPill tone="neutral">Withdrawal requested · payable after {ended ? "the next roll" : <DateTime ts={v.targetExpiry} />}.</StatusPill>}
           {me && me.claimAssets > 0n && (
             <Button variant="secondary" size="md" block loading={tx.busy} onClick={() => void collect("assets")}>

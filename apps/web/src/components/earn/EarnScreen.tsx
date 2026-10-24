@@ -60,7 +60,7 @@ export function EarnScreen() {
         <SectionTitle id="vaults-title">Vaults</SectionTitle>
         <VaultRows vaults={vaults.data} loading={(vaults.isLoading || metaMissing) && !vaults.data} failed={vaults.isError && !vaults.data} onRetry={retry} tokens={tokens} open={open} now={now} onOpen={(a, pay) => setVault(a, { pay })} />
         <p className="mt-3 text-caption text-ink-3">
-          Rates are what the vault would earn right now, after the 0.015% trade fee. Withdrawals are paid in one token. Prefer to choose a maturity yourself?{" "}
+          Rates are what the vault would earn right now, after the 0.015% trade fee. Withdrawals are paid in the loan token: vaults lend only into auto-sell markets, so defaulted collateral is sold in the next maturity's rounds first. Prefer to choose a maturity yourself?{" "}
           <Link href="/borrow" className="link">
             Lend in one market
           </Link>
