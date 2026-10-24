@@ -35,6 +35,12 @@ struct PoolState {
     uint256 filledUnits; // units ever filled (= C minted)
     uint256 repaidUnits; // units whose K was paid in full: repay, rollover, abandonment-auction fill
     uint256 closeRemaining; // unrepaid R units still open to bids during Closing
+    // Specials lending (European pools only, ARCH 2.6.1). The asset part of assetBal that is physically here is
+    // assetBal - lentUnits - shortUnits.
+    uint128 lentUnits; // lent out through Specials, returnable until the cutoff
+    uint128 lentMargin; // their margin (quote), escrowed here from the moment of lending
+    uint128 shortUnits; // lent units not returned by the cutoff, recorded lazily at the first touch after it
+    uint128 shortMargin; // the forfeited margin: pays repayers who paid K for units that are not here
 }
 
 /// @notice The whole storage of the singleton. Logic libraries receive it by storage reference.
@@ -61,16 +67,66 @@ struct CoreState {
     uint64 nextOrderId;
 }
 
-/// @notice Deploy-time constants the logic libraries need (immutables live in the core contract).
+/// @notice Deploy-time constants the logic libraries need (immutables live in the core contract), packed into three
+/// words so every forwarding call in the core pushes three constants instead of twelve (core bytecode size).
+/// a: treasury | maxOrdersPerSide << 160 | maxBids << 192 | autoSellDiscountBps << 224 | autoSellTtl << 240
+/// b: windowBlocks | anchor << 64 | batchInterval << 128 | period << 192
+/// c: specials | maxPauseBlocks << 160 | lendCutoff << 192
 struct Params {
-    address treasury;
-    uint32 maxOrdersPerSide;
-    uint32 maxBids;
-    uint64 windowBlocks;
-    uint64 anchor; // grid anchor
-    uint64 batchInterval; // base batch interval
-    uint64 period; // distance between consecutive expiries
-    uint64 maxPauseBlocks; // guardian pause budget per pool
+    uint256 a;
+    uint256 b;
+    uint256 c;
+}
+
+/// @notice Accessors for the packed Params.
+library ParamsLib {
+    function treasury(Params memory p) internal pure returns (address) {
+        return address(uint160(p.a));
+    }
+
+    function maxOrdersPerSide(Params memory p) internal pure returns (uint32) {
+        return uint32(p.a >> 160);
+    }
+
+    function maxBids(Params memory p) internal pure returns (uint32) {
+        return uint32(p.a >> 192);
+    }
+
+    function autoSellDiscountBps(Params memory p) internal pure returns (uint16) {
+        return uint16(p.a >> 224);
+    }
+
+    function autoSellTtl(Params memory p) internal pure returns (uint16) {
+        return uint16(p.a >> 240);
+    }
+
+    function windowBlocks(Params memory p) internal pure returns (uint64) {
+        return uint64(p.b);
+    }
+
+    function anchor(Params memory p) internal pure returns (uint64) {
+        return uint64(p.b >> 64);
+    }
+
+    function batchInterval(Params memory p) internal pure returns (uint64) {
+        return uint64(p.b >> 128);
+    }
+
+    function period(Params memory p) internal pure returns (uint64) {
+        return uint64(p.b >> 192);
+    }
+
+    function specials(Params memory p) internal pure returns (address) {
+        return address(uint160(p.c));
+    }
+
+    function maxPauseBlocks(Params memory p) internal pure returns (uint32) {
+        return uint32(p.c >> 160);
+    }
+
+    function lendCutoff(Params memory p) internal pure returns (uint32) {
+        return uint32(p.c >> 192);
+    }
 }
 
 /// @notice Helpers shared by the core and every logic library. Internal, so each library embeds its own copy.
@@ -145,7 +201,7 @@ library CoreLib {
         Order storage o = os[id];
         uint8 side = o.side;
         Book storage b = s.books[poolId][side];
-        uint32 max = side == BID ? p.maxBids : p.maxOrdersPerSide;
+        uint32 max = side == BID ? ParamsLib.maxBids(p) : ParamsLib.maxOrdersPerSide(p);
         if (OrderSet.sorted(side)) {
             if (b.count >= max) {
                 // Full book: evict the worst order if it has expired, or if the new order beats it on price, or
@@ -234,6 +290,8 @@ library CoreLib {
         if (o.deadline <= sc) return false;
         if (o.flags & FLAG_ROLLOVER == 0) return true;
         PoolState storage op = s.pools[s.linkedPool[poolId][id]];
+        // the old pool must hold every unit it backs: no rollover while lent units are out or recorded short
+        if (op.lentUnits != 0 || op.shortUnits != 0) return false;
         return windowOpen(s, op)
             || (op.status == Status.Open && block.timestamp < op.key.expiry && nextBoundary >= op.key.expiry);
     }
