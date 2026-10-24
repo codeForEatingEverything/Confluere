@@ -74,5 +74,6 @@ describe("auto-sell status", () => {
     expect(phase(p, 0)).toBe("selling");
     expect(PHASE_LABEL.selling).toMatch(/claims open later/);
     expect(phase({ ...p, autoSell: false }, 0)).toBe("closing");
+    expect(phase({ ...p, status: Status.Selling, autoSell: false }, 0)).toBe("selling");
   });
 });
