@@ -1,8 +1,8 @@
 "use client";
 
 /**
- * The network's own coin as a payable asset (IA v3.1 item 11): HYPE on HyperEVM, MON on Monad, listed next to WHYPE /
- * WMON. Markets trade the wrapped token; paying in the coin adds one "Wrap" step at the front of the same button flow
+ * The network's own coin as a payable asset (IA v3.1 item 11): HYPE on HyperEVM, MON on Monad, ETH on Sepolia, listed
+ * next to WHYPE / WMON / WETH. Markets trade the wrapped token; paying in the coin adds one "Wrap" step at the front of the same button flow
  * (WETH9-style `deposit()`, 1:1). There is no separate wrap or unwrap feature, no toggle, and nothing is unwrapped on
  * the way back: proceeds and refunds arrive as WHYPE / WMON and are shown as such.
  *
@@ -32,8 +32,12 @@ export const isWrappedNative = (chainId: number, token: string | undefined) => !
 /** The coin as a token row (zero address, 18 decimals, "HYPE" / "MON"). */
 export const nativeTokenOf = (chainId: number): Token => ({ address: NATIVE, symbol: chainMeta(chainId).native, decimals: 18 });
 
-/** Kept back by Max so the wallet can still pay for the transactions (gas is paid in the same coin). */
-export const GAS_RESERVE: Record<number, bigint> = { 998: 2n * 10n ** 16n, 10143: 2n * 10n ** 17n };
+/**
+ * Kept back by Max so the wallet can still pay for the transactions (gas is paid in the same coin). Sepolia: 0.01 ETH;
+ * its fork prices deployed code and big calls high (a 48-order Router batch used 20M gas on a fork, 2026-10-23), so the
+ * reserve covers a few such calls at 0.1 gwei.
+ */
+export const GAS_RESERVE: Record<number, bigint> = { 998: 2n * 10n ** 16n, 10143: 2n * 10n ** 17n, 11155111: 10n ** 16n };
 export const gasReserve = (chainId: number) => GAS_RESERVE[chainId] ?? 10n ** 16n;
 
 /** Spendable coin: the balance minus the gas reserve (never negative). */
