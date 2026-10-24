@@ -61,7 +61,7 @@ contract CreateVaults is Script {
             v[0] = _vault(
                 f,
                 me,
-                Vault.Strategy(native, a1, Kind.American, Vault.StrikeRule.LowestTraded, 2500, 9950),
+                Vault.Strategy(native, a1, Kind.American, Vault.StrikeRule.MainTier, 2500, 9950),
                 "Confluere Pegged Loop Vault",
                 "rvNATIVE-Pegged",
                 bytes32("pegged")
@@ -70,7 +70,7 @@ contract CreateVaults is Script {
         v[1] = _vault(
             f,
             me,
-            Vault.Strategy(usdc, a2, Kind.American, Vault.StrikeRule.LowestTraded, 2500, 9900),
+            Vault.Strategy(usdc, a2, Kind.American, Vault.StrikeRule.MainTier, 2500, 9900),
             "Confluere USD Low-Strike Vault",
             "rvUSD-NATIVE-Low",
             bytes32("usd-low")
@@ -78,7 +78,7 @@ contract CreateVaults is Script {
         v[2] = _vault(
             f,
             me,
-            Vault.Strategy(usdc, a2, Kind.American, Vault.StrikeRule.HighestTraded, 2500, 9900),
+            Vault.Strategy(usdc, a2, Kind.American, Vault.StrikeRule.HighTier, 2500, 9900),
             "Confluere USD High-Strike Vault",
             "rvUSD-NATIVE-High",
             bytes32("usd-high")
@@ -94,7 +94,7 @@ contract CreateVaults is Script {
         return _vault(
             f,
             me,
-            Vault.Strategy(quote, a, Kind.American, Vault.StrikeRule.LowestTraded, 2500, 9900),
+            Vault.Strategy(quote, a, Kind.American, Vault.StrikeRule.MainTier, 2500, 9900),
             "Confluere Native Lend Vault",
             "rvNATIVE-Lend",
             bytes32("native-lend")
