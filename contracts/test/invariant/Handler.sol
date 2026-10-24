@@ -174,12 +174,12 @@ contract Handler is Test {
         calls++;
         if (refs.length == 0) return;
         Ref memory ref = refs[r % refs.length];
-        (address owner,,,,,,) = core.order(ref.pid, ref.id);
+        (address owner,,,,,,,) = core.order(ref.pid, ref.id);
         if (owner == address(0)) return;
         uint256 w = weth.balanceOf(address(core));
         uint256 u = usdc.balanceOf(address(core));
         IConfluere.PoolView memory v = core.pool(ref.pid);
-        (,,,,, uint32 deadline,) = core.order(ref.pid, ref.id);
+        (,,,,,, uint32 deadline,) = core.order(ref.pid, ref.id);
         bool live = v.status == Status.Open && block.timestamp < v.key.expiry && deadline > v.settleCount;
         vm.prank(a % 2 == 0 ? owner : _actor(a));
         try core.cancelOrder(ref.pid, ref.id) {

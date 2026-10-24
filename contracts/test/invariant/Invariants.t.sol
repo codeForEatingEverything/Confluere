@@ -181,10 +181,10 @@ contract InvariantsTest is Test {
     function _escrows() internal view returns (uint256 a, uint256 q) {
         for (uint256 i; i < h.refsLength(); ++i) {
             (bytes32 pid, uint64 id) = h.refs(i);
-            (address owner, uint8 side, uint96 units,, uint128 escrow,,) = core.order(pid, id);
+            (address owner, uint8 side,, uint96 units,, uint128 escrow,,) = core.order(pid, id);
             if (owner == address(0)) continue;
             if (side == SELL || side == NC_SELL) {
-                if (core.rolloverSource(pid, id) != bytes32(0)) q += escrow;
+                if (core.linkedPool(pid, id) != bytes32(0)) q += escrow;
                 else a += units;
             } else {
                 q += escrow;
