@@ -65,7 +65,7 @@ export function vaultSentences(v: Pick<VaultRow, "strikeRule" | "capBps">, quote
 /** "1 WHYPE per 34.00 USDC": what backs a lending position, per buy-back price. */
 export const backedBy = (asset: string, buyBack: string, quote: string) => `1 ${asset} per ${buyBack} ${quote}`;
 
-/** Network names as the switcher shows them: "HyperEVM Testnet", "Monad Testnet", "Local (anvil)". */
+/** Network names as the switcher shows them: "HyperEVM Testnet", "Monad Testnet", "Sepolia Testnet", "Local (anvil)". */
 export function networkName(m: { id: number; name: string; testnet: boolean }): string {
   if (m.id === 31337) return "Local (anvil)";
   return m.testnet ? `${m.name} Testnet` : m.name;
@@ -79,6 +79,8 @@ export function priceSource(chainId: number, asset: string, quote: string, o: { 
   if (lst && native && a === lst.toLowerCase() && q === native.toLowerCase()) return `${o.assetSymbol ?? "the staked token"}'s own rate`;
   if (chainId === 998 || chainId === 999) return "HyperCore spot";
   if (chainId === 10143 || chainId === 143) return "Kuru order book";
+  // Sepolia has no market worth quoting: the reference is Ethereum mainnet's ETH / USD spot (lib/refPrice)
+  if (chainId === 11155111 || chainId === 1) return "ETH / USD spot (mainnet)";
   return "reference feed";
 }
 

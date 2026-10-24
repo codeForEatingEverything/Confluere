@@ -2,9 +2,9 @@
 
 /**
  * Getting a token the selected market needs, as the smallest possible step (spec requirement (a)): a link to Circle's
- * faucet for testnet USDC; for WHYPE / WMON the step is "wrap", which the UI shows as "Pay with HYPE / MON instead"
+ * faucet for testnet USDC; for WHYPE / WMON / WETH the step is "wrap", which the UI shows as "Pay with HYPE / MON instead"
  * (IA v3.1 item 11: the native coin is a pay-with choice and the wrap runs inside the card's own button flow, never as
- * a separate wrap button). Never staking: an LST (shMON) is only mentioned inside the Loop flow on a staked-token
+ * a separate wrap button). Never staking: an LST (shMON, wstETH) is only mentioned inside the Loop flow on a staked-token
  * market, through `stakeStep`. Mock tokens (anvil) have a public `mint`, proven by a dry run before it is offered.
  */
 import { useQuery } from "@tanstack/react-query";
@@ -24,7 +24,7 @@ export const stakeAbi = parseAbi(["function deposit(uint256 assets, address rece
 
 export type Obtain =
   | { kind: "wrap"; note: string }
-  | { kind: "stake"; note: string; href?: string }
+  | { kind: "stake"; note: string; href?: string; /** Who stakes it ("FastLane", "Lido"); the Loop flow names them. */ provider: string }
   | { kind: "link"; note: string; href: string };
 
 export const CIRCLE_FAUCET = "https://faucet.circle.com";
@@ -34,7 +34,14 @@ const KNOWN: Record<number, Record<string, Obtain>> = {
   10143: {
     "0xfb8bf4c1cc7a94c73d209a149ea2abea852bc541": { kind: "wrap", note: "WMON is MON, wrapped 1:1." },
     "0x534b2f3a21130d7a60830c2df862319e593943a3": { kind: "link", note: "Testnet USDC comes from Circle's faucet.", href: CIRCLE_FAUCET },
-    "0x282bddff5e58793acab65438b257dbd15a8745c9": { kind: "stake", note: "shMON is staked MON (FastLane).", href: "https://shmonad.xyz" },
+    "0x282bddff5e58793acab65438b257dbd15a8745c9": { kind: "stake", note: "shMON is staked MON (FastLane).", href: "https://shmonad.xyz", provider: "FastLane" },
+  },
+  // Sepolia: Uniswap's canonical WETH9, Circle's USDC, Lido's wstETH (staked ETH, wrapped). Lido has no Sepolia staking
+  // site, so no link: the note says what to do (ETH sent to the wstETH contract is staked and wrapped in one step).
+  11155111: {
+    "0xfff9976782d46cc05630d1f6ebab18b2324d6b14": { kind: "wrap", note: "WETH is ETH, wrapped 1:1." },
+    "0x1c7d4b196cb0c7b01d743fbc6116a902379c7238": { kind: "link", note: "Testnet USDC comes from Circle's faucet.", href: CIRCLE_FAUCET },
+    "0xb82381a3fbd3fafa77b3a7be693342618240067b": { kind: "stake", note: "Send Sepolia ETH to the wstETH contract 0xB82381A3fBD3FaFA77B3a7bE693342618240067b; it stakes and wraps it.", provider: "Lido" },
   },
   998: {
     "0x5555555555555555555555555555555555555555": { kind: "wrap", note: "WHYPE is HYPE, wrapped 1:1." },
@@ -45,6 +52,7 @@ const KNOWN: Record<number, Record<string, Obtain>> = {
 export const NATIVE_FAUCET: Record<number, string> = {
   10143: "https://faucet.monad.xyz",
   998: "https://app.hyperliquid-testnet.xyz/drip",
+  11155111: "https://cloud.google.com/application/web3/faucet/ethereum/sepolia",
 };
 
 /**
@@ -74,9 +82,9 @@ export function getTokenStep(chainId: number, t: { address: Address; symbol: str
 }
 
 /** Loop flow only: one line on how the LST is made (staking happens outside Confluere). */
-export function stakeStep(chainId: number, lst: Address): { note: string; href?: string } | undefined {
+export function stakeStep(chainId: number, lst: Address): { note: string; href?: string; provider: string } | undefined {
   const k = KNOWN[chainId]?.[lst.toLowerCase()];
-  return k?.kind === "stake" ? { note: k.note, href: k.href } : undefined;
+  return k?.kind === "stake" ? { note: k.note, href: k.href, provider: k.provider } : undefined;
 }
 
 /** Transaction for the wrap step (WETH9-style deposit(), 1:1). */
