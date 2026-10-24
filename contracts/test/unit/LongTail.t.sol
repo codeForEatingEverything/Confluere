@@ -174,6 +174,7 @@ contract LongTailTest is Base {
         // a demo grid: 1-hour expiries, 2-minute batches -> 48 x 2 min = 96 min > 1 h
         Confluere.Config memory c = _config();
         c.grid = GridConfig({anchor: ANCHOR, period: 1 hours, batchInterval: 2 minutes, maxExpiries: 4});
+        c.lendCutoff = 10 minutes;
         Confluere demo = new Confluere(c);
         weth.approve(address(demo), type(uint256).max);
         usdc.approve(address(demo), type(uint256).max);

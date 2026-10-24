@@ -14,6 +14,7 @@ contract WrapperNamesTest is Base {
     function test_wrapper_subDailyGridNamesCarryTime() public {
         Confluere.Config memory cfg = _config();
         cfg.grid.period = 1 hours;
+        cfg.lendCutoff = 10 minutes;
         Confluere hourly = new Confluere(cfg);
         weth.approve(address(hourly), 1);
         usdc.approve(address(hourly), 1);
