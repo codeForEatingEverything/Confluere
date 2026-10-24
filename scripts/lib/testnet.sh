@@ -46,9 +46,11 @@ TRADE_ROUNDS=${TRADE_ROUNDS:-3}
 MATURITY_DAYS=${MATURITY_DAYS:-"1 7 14"}
 
 # Chain parameters without touching the network: RPC, strikes, the deployments file, HyperEVM's gas flags. Tokens
-# default to the real ones above. scripts/test/grad-seed.test.sh reads them too.
+# default to the real ones above. scripts/test/grad-seed.test.sh reads them too. LST_FUND=receive: sending native coin
+# to the LST contract mints it (preflight's FUND=1 uses that); LST_HINT: how to get the LST by hand.
 testnet_params() {
   CHAIN=$1
+  LST_FUND="" LST_HINT=""
   case "$CHAIN" in
     monad)
       R=https://testnet-rpc.monad.xyz
@@ -67,6 +69,7 @@ testnet_params() {
       # (the wallet holds little shMON; neither pair has to graduate)
       export SEED_UNIT_BPS=${SEED_UNIT_BPS:-200} LST_SEED_UNIT_BPS=${LST_SEED_UNIT_BPS:-20}
       export EXTRA_SEED_UNIT_BPS=${EXTRA_SEED_UNIT_BPS:-50}
+      LST_HINT="FastLane deposit(assets, receiver), ~12.9 MON per shMON"
       EXTRA=()
       ;;
     hyperevm)
@@ -87,6 +90,43 @@ testnet_params() {
       export SEED_CHUNK=${SEED_CHUNK:-6}
       EXTRA=(--disable-block-gas-limit)                       # big blocks toggled per step
       export FOUNDRY_GAS_LIMIT=30000000
+      ;;
+    sepolia)
+      R=${SEPOLIA_RPC:-https://ethereum-sepolia-rpc.publicnode.com} # SEPOLIA_RPC=https://sepolia.drpc.org also works
+      NAME=sepolia
+      export LST=$S_WSTETH NATIVE=$S_WETH USDC=$S_USDC
+      # The seven-row chain table's salt (see TESTNET_SALT above): a new core address, apart from the live testnets.
+      TESTNET_SALT=$TESTNET_SALT_NEXT
+      # One buy-back price per pair at about 90% of the collateral's normal market value on the 2-digit grid
+      # (2026-10-23). wstETH is worth what it redeems for on this chain, 1.0377 ETH (stEthPerToken: unlike shMON's,
+      # the Sepolia rate is what staking pays here): 0.93 WETH (90%). ETH ≈ 2375 USD (Ethereum mainnet Chainlink
+      # ETH/USD; the Sepolia DEX books are testnet artefacts): 2100 USDC per WETH (88%).
+      export LST_STRIKE_HIGH=930000000000000000 LST_STRIKE_LOW=930000000000000000 # 0.93 WETH per wstETH
+      export USD_STRIKE_LOW=2100000000 USD_STRIKE_HIGH=2100000000                # 2100 USDC per WETH
+      # Extra pair wstETH/USDC (as shMON/USDC on Monad): 1.0377 x 2375 = 2465 USD, 2200 USDC per wstETH (89%).
+      export EXTRA_ASSET=$S_WSTETH EXTRA_QUOTE=$S_USDC EXTRA_BAND=800
+      export EXTRA_STRIKE_LOW=2200000000 EXTRA_STRIKE_HIGH=2200000000
+      # Seed units, small because faucet Sepolia ETH and USDC are scarce: WETH/USDC and wstETH/USDC 0.0001 (the
+      # smallest unit; ~0.21 USDC per order clears the 0.001 USDC graduation row many times over); wstETH/WETH
+      # 0.0012 wstETH (0.00112 WETH at K, just above the 0.001 WETH order minimum; like shMON/WMON it need not
+      # graduate). The launch run (3 expiries, 3 trade rounds) needs ~0.04 wstETH, ~0.04 WETH and ~13 USDC.
+      export SEED_UNIT_BPS=${SEED_UNIT_BPS:-1} LST_SEED_UNIT_BPS=${LST_SEED_UNIT_BPS:-12}
+      export EXTRA_SEED_UNIT_BPS=${EXTRA_SEED_UNIT_BPS:-1}
+      # Router.placeOrders batches of 24 orders: ~10M gas each at Amsterdam's storage prices (48 took 20M on a fork).
+      # Sepolia does take transactions above 2^24 gas (30M-limit transactions land, 2026-10-23); smaller batches just
+      # lose less to a dropped one
+      export SEED_CHUNK=${SEED_CHUNK:-24}
+      # native ETH kept for gas by preflight's FUND=1 (pools, seed, trade rounds, vaults and later rolls)
+      export GAS_RESERVE=${GAS_RESERVE:-50000000000000000}
+      LST_FUND=receive
+      LST_HINT="send Sepolia ETH to wstETH $S_WSTETH (its receive() stakes and wraps, ~1.04 ETH per wstETH), or FUND=1"
+      # Sepolia runs Amsterdam's state-creation pricing (~1,550 gas per byte of deployed code, 31M gas for a 20 KB
+      # contract; checked with eth_estimateGas 2026-10-23), which forge's local simulation (evm_version cancun) does
+      # not know: its gas limits ran out on a fork. Skip it, so forge asks the node to estimate each transaction
+      # (--slow sends them one by one, so each estimate sees the previous ones). The script itself still runs first.
+      # Public Sepolia RPCs drop some of the thousands of storage reads a tick or trade script makes (each drop was a
+      # FatalExternalError before anything was sent, 2026-10-24): let forge retry a failed fork read.
+      EXTRA=(--skip-simulation --fork-retries 12 --fork-retry-backoff 2000)
       ;;
     *) return 1 ;;
   esac
