@@ -1,0 +1,7 @@
+target/
+out/*.csv
+out/plots/
+.venv/
+notebooks/.ipynb_checkpoints/
+contracts-mocks/cache/
+contracts-mocks/out/

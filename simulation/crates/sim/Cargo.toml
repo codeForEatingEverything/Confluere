@@ -1,0 +1,20 @@
+[package]
+name = "confluere-sim"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "sim"
+path = "src/main.rs"
+
+[dependencies]
+confluere-model = { path = "../model" }
+confluere-evm = { path = "../evm" }
+alloy-primitives.workspace = true
+alloy-sol-types.workspace = true
+anyhow.workspace = true
+rand.workspace = true
+rand_chacha.workspace = true
+csv.workspace = true
+serde.workspace = true
