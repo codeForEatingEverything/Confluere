@@ -1,7 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { readFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { existsSync, readFileSync } from "node:fs";
 import {
   buildConfig,
+  CRE_CHAINS,
+  creChain,
+  defaultBase,
+  scheduleFor,
   chunkRanges,
   livePools,
   readStatuses,
@@ -109,5 +114,69 @@ describe("sync-config", () => {
       ),
     ).rejects.toThrow("down");
     expect(n).toBe(3);
+  });
+
+  it("targets Monad testnet and Sepolia, each with its own config file and getLogs cap", () => {
+    expect(creChain("monad-testnet")).toMatchObject({ chainId: 10143, config: "config.staging.json", chunk: 100n });
+    expect(creChain("sepolia")).toMatchObject({
+      chainId: 11155111,
+      chainSelectorName: "ethereum-testnet-sepolia",
+      config: "config.sepolia.json",
+      target: "sepolia-settings",
+      chunk: 1000n,
+    });
+    expect(CRE_CHAINS.sepolia.forwarder.mock).toBe("0x15fC6ae953E024d975e77382eEeC56A9101f9F88");
+    expect(() => creChain("hyperevm-testnet")).toThrow(/not a CRE target/);
+    expect(() => creChain("toString")).toThrow(/not a CRE target/);
+  });
+
+  it("uses chain-selector names the CRE SDK resolves to the same chain ids", async () => {
+    for (const row of Object.values(CRE_CHAINS)) {
+      const f = new URL(
+        `../node_modules/@chainlink/cre-sdk/dist/generated/chain-selectors/testnet/evm/${row.chainSelectorName}.js`,
+        import.meta.url,
+      );
+      const n = (await import(f.href)).default as { chainId: string; chainSelector: { name: string } };
+      expect(n.chainSelector.name).toBe(row.chainSelectorName);
+      expect(Number(n.chainId)).toBe(row.chainId);
+    }
+  });
+
+  it("derives the cron from the grid's batch interval", () => {
+    expect(scheduleFor(120)).toBe("5 */2 * * * *");
+    expect(scheduleFor(60)).toBe("5 * * * * *");
+    expect(scheduleFor(1800)).toBe("5 */30 * * * *");
+    expect(scheduleFor(3600)).toBe("5 0 * * * *");
+    expect(scheduleFor(21_600)).toBe("5 0 */6 * * *");
+    expect(scheduleFor(86_400)).toBe("5 0 0 * * *");
+    expect(() => scheduleFor(90)).toThrow(/no cron/);
+    expect(() => scheduleFor(420)).toThrow(/no cron/);
+  });
+
+  it("starts a Sepolia config from the deployment and never mixes chains", () => {
+    const row = creChain("sepolia");
+    const sepolia = { chainId: 11155111, batchInterval: 120, keeperReceiver: "0x5149637A57030b2A07463032758F542fe987EB6A", vaults: {} };
+    const base = defaultBase(row, sepolia);
+    expect(base).toMatchObject({ schedule: "5 */2 * * * *", chainSelectorName: "ethereum-testnet-sepolia", isTestnet: true });
+    // Sepolia's storage pricing: a first settlement of a fresh expiry does not fit Monad's 8M report gas
+    expect(base.gasLimit).toBe("30000000");
+    expect(defaultBase(creChain("monad-testnet"), { ...sepolia, chainId: 10143 }).gasLimit).toBe("8000000");
+    expect(buildConfig(base, sepolia, [id("aa")], row)).toMatchObject({ receiver: sepolia.keeperReceiver, pools: [id("aa")] });
+    // a config copied from Monad gets Sepolia's selector; a Monad deployment is refused for the Sepolia target
+    const monadBase = { ...base, chainSelectorName: "monad-testnet" };
+    expect(buildConfig(monadBase, sepolia, [], row).chainSelectorName).toBe("ethereum-testnet-sepolia");
+    expect(() => buildConfig(base, { ...sepolia, chainId: 10143 }, [], row)).toThrow(/not ethereum-testnet-sepolia/);
+  });
+
+  it("skips a chain that has no deployments file yet without touching anything", () => {
+    if (existsSync(new URL("../../../deployments/sepolia.json", import.meta.url))) return; // deployed since
+    const script = new URL("../scripts/sync-config.mjs", import.meta.url).pathname;
+    const out = execFileSync(process.execPath, [script], {
+      env: { ...process.env, DEPLOYMENT: "sepolia" },
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    expect(out).toBe("");
+    expect(existsSync(new URL("../config.sepolia.json", import.meta.url))).toBe(false);
   });
 });
