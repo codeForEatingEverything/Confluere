@@ -53,8 +53,11 @@ interface IConfluere {
     struct MarketStats {
         uint128 volume; // quote traded at this expiry across the market
         uint128 fees; // treasury fees earned at this expiry: trade fees at clearing + spread share at close
-        uint96 minStrike; // lowest strike with any fill at this expiry
-        uint96 maxStrike; // highest strike with any fill at this expiry
+        uint128 mainVolume; // traded volume of the main tier: the tier with the most volume at this expiry
+        uint96 mainStrike; // main tier = (strike, band, cadence); ties keep the tier that got there first
+        int16 mainIndex;
+        uint16 mainBand;
+        uint8 mainCadence;
         bool bad; // paused or circuit breaker tripped at this expiry
     }
 
@@ -147,6 +150,8 @@ interface IConfluere {
     /// @notice Block at which the shared repayment window of `expiry` ends; 0 until the first pool of it matures.
     function expiryWindowEnd(uint64 expiry) external view returns (uint64);
     function marketStats(bytes32 marketId, uint64 expiry) external view returns (MarketStats memory);
+    /// @notice Quote traded at one tier (PoolKeyLib.tierKey(strike, bandBps, cadence)) of a market at an expiry.
+    function tierVolume(bytes32 marketId, uint64 expiry, uint256 tierKey) external view returns (uint256);
     function pending(address token, address account) external view returns (uint256);
     function marketFees(bytes32 marketId) external view returns (uint256);
     function flashFees(address token) external view returns (uint256);
