@@ -30,7 +30,7 @@ contract InvariantsTest is Test {
         weth = new MockERC20("WETH", "WETH", 18);
         usdc = new MockERC20("USDC", "USDC", 6);
         Confluere.Config memory c;
-        c.grid = GridConfig(ANCHOR, WEEK, 30 minutes, 4, 2);
+        c.grid = GridConfig(ANCHOR, WEEK, 30 minutes, 4);
         c.maxOrdersPerSide = 8;
         c.maxBids = 4;
         c.chains = new Confluere.ChainParams[](1);
@@ -47,15 +47,18 @@ contract InvariantsTest is Test {
         usdc.approve(address(core), type(uint256).max);
         bytes32[] memory ps = new bytes32[](3);
         ps[0] = core.createPool(
-            PoolKey(address(weth), address(usdc), ANCHOR + WEEK, 3000e6, Kind.American, 800, 0),
+            PoolKey(address(weth), address(usdc), ANCHOR + WEEK, 3_010_966_302, Kind.American, 800, 0),
+            805,
             IConfluere.PoolOptions(0, 0, 0, false)
         );
         ps[1] = core.createPool(
-            PoolKey(address(weth), address(usdc), ANCHOR + 2 * WEEK, 3000e6, Kind.American, 800, 0),
+            PoolKey(address(weth), address(usdc), ANCHOR + 2 * WEEK, 3_010_966_302, Kind.American, 800, 0),
+            805,
             IConfluere.PoolOptions(0, 0, 0, false)
         );
         ps[2] = core.createPool(
-            PoolKey(address(weth), address(usdc), ANCHOR + WEEK, 3100e6, Kind.European, 150, 0),
+            PoolKey(address(weth), address(usdc), ANCHOR + WEEK, 3_102_201_591, Kind.European, 150, 0),
+            808,
             IConfluere.PoolOptions(0, 0, 0, false)
         );
 
