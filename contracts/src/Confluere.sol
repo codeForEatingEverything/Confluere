@@ -42,7 +42,6 @@ contract Confluere is IConfluere, IERC6909TokenSupply, IERC3156FlashLender, Reen
     uint64 internal immutable GRID_PERIOD;
     uint64 internal immutable GRID_BATCH;
     uint32 internal immutable GRID_MAX_EXPIRIES;
-    uint8 internal immutable GRID_SIG_DIGITS;
 
     uint64 public immutable WINDOW_BLOCKS;
     uint64 public immutable MAX_PAUSE_BLOCKS;
@@ -93,7 +92,6 @@ contract Confluere is IConfluere, IERC6909TokenSupply, IERC3156FlashLender, Reen
         GRID_PERIOD = c.grid.period;
         GRID_BATCH = c.grid.batchInterval;
         GRID_MAX_EXPIRIES = c.grid.maxExpiries;
-        GRID_SIG_DIGITS = c.grid.strikeSigDigits;
         WINDOW_BLOCKS = cp.windowBlocks;
         MAX_PAUSE_BLOCKS = cp.maxPauseBlocks;
         MAX_ORDERS_PER_SIDE = c.maxOrdersPerSide;
@@ -111,8 +109,12 @@ contract Confluere is IConfluere, IERC6909TokenSupply, IERC3156FlashLender, Reen
     // ================================================================ pools
 
     /// @inheritdoc IConfluere
-    function createPool(PoolKey calldata key, PoolOptions calldata opts) external nonReentrant returns (bytes32) {
-        return OrderLogic.createPool(s, grid(), key, opts);
+    function createPool(PoolKey calldata key, int16 strikeIndex, PoolOptions calldata opts)
+        external
+        nonReentrant
+        returns (bytes32)
+    {
+        return OrderLogic.createPool(s, grid(), key, strikeIndex, opts);
     }
 
     // ================================================================ orders
@@ -299,7 +301,7 @@ contract Confluere is IConfluere, IERC6909TokenSupply, IERC3156FlashLender, Reen
     // ================================================================ views
 
     function grid() public view returns (GridConfig memory) {
-        return GridConfig(GRID_ANCHOR, GRID_PERIOD, GRID_BATCH, GRID_MAX_EXPIRIES, GRID_SIG_DIGITS);
+        return GridConfig(GRID_ANCHOR, GRID_PERIOD, GRID_BATCH, GRID_MAX_EXPIRIES);
     }
 
     function pool(bytes32 poolId) external view returns (PoolView memory v) {
@@ -307,6 +309,7 @@ contract Confluere is IConfluere, IERC6909TokenSupply, IERC3156FlashLender, Reen
         v.key = ps.key;
         v.status = ps.status;
         v.assetDecimals = ps.assetDecimals;
+        v.strikeIndex = ps.strikeIndex;
         v.bandFailures = ps.bandFailures;
         v.settleCount = ps.settleCount;
         v.lastSettledBatch = ps.lastSettledBatch;
