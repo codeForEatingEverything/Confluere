@@ -137,6 +137,14 @@ contract InvariantsTest is Test {
         assertFalse(h.pushedDuringNoPushCall(), "token left during a no-push call");
     }
 
+    /// @dev Invariant 3c: the guardian's pause budget per pool is cumulative and a running pause cannot be extended.
+    function invariant_pauseCap() public view {
+        assertFalse(h.pauseExtended(), "running pause extended");
+        for (uint256 i; i < h.poolsLength(); ++i) {
+            assertLe(core.pool(h.pools(i)).pausedBlocks, 1000, "pause budget exceeded");
+        }
+    }
+
     /// @dev Blueprint 3.5: pools of one expiry share a window however late each is matured.
     function invariant_windowsAligned() public view {
         assertFalse(h.windowMisaligned(), "window not aligned per expiry");

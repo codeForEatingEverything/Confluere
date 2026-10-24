@@ -46,6 +46,7 @@ contract Handler is Test {
     bool public pushedDuringNoPushCall;
     bool public windowMisaligned; // blueprint 3.5: every pool of an expiry shares one window
     bool public lockedCancelled; // a live locked order was cancelled
+    bool public pauseExtended; // invariant 3c: a running pause was extended
     FlashBorrower public borrower = new FlashBorrower();
     mapping(uint64 => bool) internal _locked;
 
@@ -326,8 +327,12 @@ contract Handler is Test {
 
     function pause(uint256 p, uint256 blocks) external guarded {
         calls++;
+        bytes32 pid = _pool(p);
+        bool running = block.number < core.pool(pid).pausedUntil;
         vm.prank(address(0xdead)); // the guardian in Invariants.setUp
-        try core.pause(_pool(p), uint64(bound(blocks, 1, 1000))) {} catch {}
+        try core.pause(pid, uint64(bound(blocks, 1, 600))) {
+            if (running) pauseExtended = true;
+        } catch {}
     }
 
     function placeBid(uint256 a, uint256 p, uint256 units, uint256 surplus) external guarded {
