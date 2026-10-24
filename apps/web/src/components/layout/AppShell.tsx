@@ -12,6 +12,7 @@ import { NetworkStatus } from "../ui/NetworkStatus";
 import { ToastRegion } from "../ui/Toast";
 import { MoreMenu } from "./MoreMenu";
 import { NetworkMenu } from "./NetworkMenu";
+import { NotDeployed, worksUndeployed } from "./NotDeployed";
 import { WalletMenu, WalletPicker } from "./WalletMenu";
 import { GITHUB_URL, PRIMARY, TABS, inMore, needsBack } from "./nav";
 
@@ -144,6 +145,13 @@ export function Footer() {
   );
 }
 
+/** The page, or the calm "not deployed yet" state on a served network without contracts (components/layout/NotDeployed). */
+function Page({ children }: { children: ReactNode }) {
+  const { deployment } = useActiveChain();
+  const path = usePathname() ?? "/";
+  return !deployment && !worksUndeployed(path) ? <NotDeployed /> : <>{children}</>;
+}
+
 export function AppShell({ children }: { children: ReactNode }) {
   return (
     <>
@@ -154,7 +162,7 @@ export function AppShell({ children }: { children: ReactNode }) {
       <TestnetStrip />
       <main id="main" tabIndex={-1} className="mx-auto max-w-[1200px] px-4 pt-6 outline-none lg:px-6 lg:pt-10">
         <BackHeader />
-        {children}
+        <Page>{children}</Page>
       </main>
       <Footer />
       <TabBar />
