@@ -7,6 +7,7 @@ import {IConfluere} from "../src/interfaces/IConfluere.sol";
 import {Router} from "../src/periphery/Router.sol";
 import {ERC6909WrapperFactory} from "../src/periphery/ERC6909Wrapper.sol";
 import {VaultFactory} from "../src/periphery/VaultFactory.sol";
+import {Vault} from "../src/periphery/Vault.sol";
 import {KeeperReceiver} from "../src/periphery/KeeperReceiver.sol";
 import {SeatRegistry} from "../src/periphery/SeatRegistry.sol";
 import {Specials} from "../src/periphery/Specials.sol";
@@ -312,8 +313,9 @@ contract Deploy is Script {
         if (p.router == address(0)) p.router = address(new Router{salt: salt}(core));
         p.wrapperFactory = _existing(salt, abi.encodePacked(type(ERC6909WrapperFactory).creationCode, arg));
         if (p.wrapperFactory == address(0)) p.wrapperFactory = address(new ERC6909WrapperFactory{salt: salt}(core));
-        p.vaultFactory = _existing(salt, abi.encodePacked(type(VaultFactory).creationCode, arg));
-        if (p.vaultFactory == address(0)) p.vaultFactory = address(new VaultFactory{salt: salt}(core));
+        bytes32 vaultCode = keccak256(type(Vault).creationCode);
+        p.vaultFactory = _existing(salt, abi.encodePacked(type(VaultFactory).creationCode, abi.encode(core, vaultCode)));
+        if (p.vaultFactory == address(0)) p.vaultFactory = address(new VaultFactory{salt: salt}(core, vaultCode));
         p.keeperReceiver =
             _existing(salt, abi.encodePacked(type(KeeperReceiver).creationCode, abi.encode(core, uint256(16))));
         if (p.keeperReceiver == address(0)) p.keeperReceiver = address(new KeeperReceiver{salt: salt}(core, 16));

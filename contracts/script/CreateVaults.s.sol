@@ -113,6 +113,6 @@ contract CreateVaults is Script {
     ) internal returns (Vault v) {
         bytes memory init = abi.encodePacked(type(Vault).creationCode, abi.encode(f.core(), s, name, symbol));
         v = Vault(vm.computeCreate2Address(keccak256(abi.encode(me, salt)), keccak256(init), address(f)));
-        if (address(v).code.length == 0) v = f.create(s, name, symbol, salt);
+        if (address(v).code.length == 0) v = f.create(type(Vault).creationCode, s, name, symbol, salt);
     }
 }
