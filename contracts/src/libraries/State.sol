@@ -7,7 +7,7 @@ import {IERC6909} from "@openzeppelin/contracts/interfaces/IERC6909.sol";
 
 import {IConfluere} from "../interfaces/IConfluere.sol";
 import {PoolKey, PoolKeyLib, Status} from "./PoolKey.sol";
-import {Order, Book, OrderSet, SELL, NC_SELL, BID, FLAG_ROLLOVER} from "./OrderSet.sol";
+import {Order, Book, OrderSet, SELL, NC_SELL, BID, FLAG_ROLLOVER, FLAG_AUTOSELL} from "./OrderSet.sol";
 
 /// @notice Per-pool state. All funds stay in the singleton; these are the pool's shares of them.
 struct PoolState {
@@ -41,6 +41,10 @@ struct PoolState {
     uint128 lentMargin; // their margin (quote), escrowed here from the moment of lending
     uint128 shortUnits; // lent units not returned by the cutoff, recorded lazily at the first touch after it
     uint128 shortMargin; // the forfeited margin: pays repayers who paid K for units that are not here
+    // autoSell (decision B): while Selling, autoSellUnits of assetBal rest as a sell order in the next expiry's pool
+    bytes32 autoSellPool;
+    uint64 autoSellOrder;
+    uint96 autoSellUnits;
 }
 
 /// @notice The whole storage of the singleton. Logic libraries receive it by storage reference.
@@ -197,6 +201,19 @@ library CoreLib {
     function insert(CoreState storage s, Params memory p, bytes32 poolId, PoolState storage ps, uint64 id, uint64 hint)
         internal
     {
+        if (!tryInsert(s, p, poolId, ps, id, hint)) revert IConfluere.BookFull();
+    }
+
+    /// @notice Inserts an order whose struct is already written; false (nothing changed) if its book is full and the
+    /// order cannot displace anything.
+    function tryInsert(
+        CoreState storage s,
+        Params memory p,
+        bytes32 poolId,
+        PoolState storage ps,
+        uint64 id,
+        uint64 hint
+    ) internal returns (bool) {
         mapping(uint64 => Order) storage os = s.orders[poolId];
         Order storage o = os[id];
         uint8 side = o.side;
@@ -209,7 +226,7 @@ library CoreLib {
                 uint64 worst = b.tail;
                 Order storage w = os[worst];
                 bool beats = w.limit == o.limit ? o.units > w.units : !OrderSet.goesAfter(side, w.limit, o.limit);
-                if (w.deadline > ps.settleCount && !beats) revert IConfluere.BookFull();
+                if (w.deadline > ps.settleCount && !beats) return false;
                 if (hint == worst) hint = w.prev;
                 removeWithRefund(s, poolId, ps, worst, RM_EVICTED);
             }
@@ -218,6 +235,7 @@ library CoreLib {
             if (b.count >= max) _evictSmallest(s, poolId, ps, b, os, o);
             b.pushBack(os, id);
         }
+        return true;
     }
 
     /// @dev Full non-competitive queue: drop an expired entry if any, else the smallest one if the new order is
@@ -265,7 +283,10 @@ library CoreLib {
         address owner = o.owner;
         uint8 side = o.side;
         if (side == SELL || side == NC_SELL) {
-            if (o.flags & FLAG_ROLLOVER != 0) {
+            if (o.flags & FLAG_AUTOSELL != 0) {
+                _endAutoSell(s, s.linkedPool[poolId][id]);
+                delete s.linkedPool[poolId][id];
+            } else if (o.flags & FLAG_ROLLOVER != 0) {
                 s.lockedR[owner][s.linkedPool[poolId][id]] -= o.units;
                 delete s.linkedPool[poolId][id];
                 if (o.escrow != 0) s.pending[ps.key.quote][owner] += o.escrow;
@@ -277,6 +298,19 @@ library CoreLib {
         }
         s.books[poolId][side].remove(s.orders[poolId], id);
         emit IConfluere.OrderRemoved(poolId, id, reason);
+    }
+
+    /// @dev An autoSell order left its book (filled, expired, evicted or purged): the source pool closes and C holders
+    /// claim the proceeds and any unsold remainder in kind.
+    function _endAutoSell(CoreState storage s, bytes32 src) private {
+        PoolState storage op = s.pools[src];
+        uint256 left = op.autoSellUnits;
+        op.autoSellUnits = 0;
+        op.autoSellOrder = 0;
+        op.autoSellPool = bytes32(0);
+        op.status = Status.Closed;
+        emit IConfluere.AutoSellEnded(src, left);
+        emit IConfluere.WindowClosed(src, op.quoteBal, op.assetBal, op.surplusBal);
     }
 
     /// @notice Whether an order may trade in the settlement numbered `sc`, whose batch is followed by a boundary at
