@@ -13,6 +13,7 @@ services:
         NEXT_PUBLIC_DEFAULT_CHAIN_ID: ${NEXT_PUBLIC_DEFAULT_CHAIN_ID:-998}
         NEXT_PUBLIC_RPC_URL_998: ${NEXT_PUBLIC_RPC_URL_998:-https://rpcs.chain.link/hyperevm/testnet}
         NEXT_PUBLIC_RPC_URL_10143: ${NEXT_PUBLIC_RPC_URL_10143:-https://testnet-rpc.monad.xyz}
+        NEXT_PUBLIC_RPC_URL_11155111: ${NEXT_PUBLIC_RPC_URL_11155111:-https://ethereum-sepolia-rpc.publicnode.com}
         NEXT_PUBLIC_REOWN_PROJECT_ID: ${NEXT_PUBLIC_REOWN_PROJECT_ID:-}
     image: confluere-web:latest
     restart: unless-stopped
@@ -21,6 +22,7 @@ services:
       # optional server-side log sources, "url|blockRange|concurrency,..." per chain
       LOGS_RPC_998: ${LOGS_RPC_998:-}
       LOGS_RPC_10143: ${LOGS_RPC_10143:-}
+      LOGS_RPC_11155111: ${LOGS_RPC_11155111:-}
     volumes:
       - web-index:/data
     expose:
