@@ -12,6 +12,7 @@ import {
   readStatuses,
   scanPoolIds,
   STATUS_CLOSED,
+  STATUS_SELLING,
   vaultsOf,
   withRetry,
 } from "../scripts/sync-config.mjs";
@@ -31,16 +32,18 @@ describe("sync-config", () => {
     expect(chunkRanges(6n, 5n, 100n)).toEqual([]);
   });
 
-  it("keeps pools that are Open, Window or Closing and drops Closed, unknown and duplicate ids", () => {
-    const ids = [id("aa"), id("bb"), id("cc"), id("dd"), id("ee"), id("AA")];
+  it("keeps pools that are Open, Window, Closing or Selling and drops Closed, unknown and duplicate ids", () => {
+    const ids = [id("aa"), id("bb"), id("cc"), id("dd"), id("ee"), id("ff"), id("AA")];
     const status = new Map<string, number>([
       [id("aa"), 1],
       [id("bb"), STATUS_CLOSED],
       [id("cc"), 2],
       [id("dd"), 0],
       [id("ee"), 3],
+      [id("ff"), STATUS_SELLING],
     ]);
-    expect(livePools(ids, status)).toEqual([id("aa"), id("cc"), id("ee")]);
+    expect(STATUS_CLOSED).toBe(5);
+    expect(livePools(ids, status)).toEqual([id("aa"), id("cc"), id("ee"), id("ff")]);
   });
 
   it("takes receiver and non-zero vaults from the deployment and keeps the schedule settings", () => {

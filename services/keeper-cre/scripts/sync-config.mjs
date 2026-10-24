@@ -2,7 +2,7 @@
 /**
  * Rebuilds config.staging.json from deployments/<chain>.json and the chain itself:
  *   receiver = keeperReceiver, vaults = the non-zero vault addresses,
- *   pools    = every pool the core created (PoolCreated logs from deployBlock) that is not Closed.
+ *   pools    = every pool the core created (PoolCreated logs from deployBlock) that is not Closed (Selling counts as live).
  *
  * The workflow carries ids only, so this is the step that keeps later expiries (opened by CreatePools.s.sol or the
  * /create wizard) in the CRE tick. Re-run it after opening pools. Read-only: no transaction is sent.
@@ -95,17 +95,18 @@ export function defaultBase(row, deployment) {
     gasLimit: row.gasLimit,
   };
 }
-/** IConfluere.Status: None, Open, Window, Closing, Closed. */
+/** IConfluere.Status (v0.8): None, Open, Window, Closing, Selling, Closed. Selling still needs closeWindow. */
 export const STATUS_NONE = 0;
-export const STATUS_CLOSED = 4;
+export const STATUS_SELLING = 4;
+export const STATUS_CLOSED = 5;
 
 export const poolCreated = parseAbiItem(
-  "event PoolCreated(bytes32 indexed poolId, (address asset, address quote, uint64 expiry, uint128 strike, uint8 kind) key, uint16 feeBps, uint16 bandBps, bytes32 indexed marketId)",
+  "event PoolCreated(bytes32 indexed poolId, (address asset, address quote, uint64 expiry, uint128 strike, uint8 kind, uint16 bandBps, uint8 cadence) key, int16 strikeIndex, bytes32 indexed marketId)",
 );
 // Only the leading fields of IConfluere.PoolView are needed; the struct is returned by value, so the head decodes
 // from the first two words (key is a static tuple, status follows it).
 const poolAbi = parseAbi([
-  "struct PoolKey { address asset; address quote; uint64 expiry; uint128 strike; uint8 kind; }",
+  "struct PoolKey { address asset; address quote; uint64 expiry; uint128 strike; uint8 kind; uint16 bandBps; uint8 cadence; }",
   "function pool(bytes32 poolId) view returns (PoolKey key, uint8 status)",
 ]);
 
