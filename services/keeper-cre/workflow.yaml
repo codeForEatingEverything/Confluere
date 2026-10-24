@@ -1,8 +1,19 @@
 # CRE workflow settings: the Confluere keeper (cron -> signed report of pool / vault ids -> KeeperReceiver).
+# One target per chain; each config names its chain (chainSelectorName) and receiver.
 staging-settings:
   user-workflow:
     workflow-name: "confluere-keeper-staging"
   workflow-artifacts:
     workflow-path: "./src/main.ts"
     config-path: "./config.staging.json"
+    secrets-path: ""
+
+# Ethereum Sepolia. config.sepolia.json does not exist until `DEPLOYMENT=sepolia pnpm sync-config` has run against
+# deployments/sepolia.json.
+sepolia-settings:
+  user-workflow:
+    workflow-name: "confluere-keeper-sepolia"
+  workflow-artifacts:
+    workflow-path: "./src/main.ts"
+    config-path: "./config.sepolia.json"
     secrets-path: ""
