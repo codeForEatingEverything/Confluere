@@ -3,6 +3,8 @@
 /** How it works (More): what happens when you borrow, when you lend, and what never happens. Plain words only. */
 import Link from "next/link";
 import { Card } from "../ui";
+import { ANVIL, ENABLED, deploymentOf } from "@/lib/chains";
+import { networkName } from "@/lib/vocab";
 
 /** One sentence, used verbatim on Borrow and here. */
 export const PROMISE = "Fixed-term borrowing against your tokens. Post collateral, receive the loan now, buy the collateral back by the deadline, or keep the proceeds.";
@@ -36,8 +38,23 @@ const SECURITY = [
   "Contracts are immutable: no owner, no upgrade, no admin keys.",
   "Only privilege: a guardian may pause a new market for up to 7 days. It cannot move funds.",
   "Internal audit, October 2026 (docs/AUDIT_2026-10-11.md on GitHub). No external audit yet.",
-  "Testnet deployment on Monad Testnet and HyperEVM Testnet, same code at the same address. Test tokens have no value.",
+  deploymentLine(),
 ];
+
+/**
+ * Where it runs, from the deployments this build has: "Testnet deployment on Monad Testnet and HyperEVM Testnet, same
+ * code at the same address." plus a served network that is not deployed yet (Sepolia before its deploy).
+ */
+export function deploymentLine(): string {
+  const nets = ENABLED.filter((c) => c.id !== ANVIL);
+  const live = nets.filter((c) => !!deploymentOf(c.id));
+  const later = nets.filter((c) => !deploymentOf(c.id));
+  const list = (xs: typeof nets) => xs.map(networkName).join(xs.length > 2 ? ", " : " and ").replace(/, ([^,]+)$/, " and $1");
+  const cores = new Set(live.map((c) => deploymentOf(c.id)!.confluere.toLowerCase()));
+  const where = live.length === 0 ? "" : `Testnet deployment on ${list(live)}${live.length > 1 ? (cores.size === 1 ? ", same code at the same address" : ", same code") : ""}. `;
+  const soon = later.length === 0 ? "" : `${list(later)} ${later.length > 1 ? "are" : "is"} supported and not deployed yet. `;
+  return `${where}${soon}Test tokens have no value.`;
+}
 
 export function HowItWorks() {
   return (
