@@ -19,11 +19,12 @@ library DeployConfig {
     uint256 internal constant ETHEREUM = 1;
     uint256 internal constant SEPOLIA = 11_155_111;
 
-    /// @notice Per-chain quote-token parameters: graduation baseline (per-expiry volume, blueprint §10) and the
-    /// anti-dust minimum order notional (valued at K). Same index in all three arrays.
+    /// @notice Per-chain quote-token parameters: graduation baseline (treasury fees earned per expiry: trade fees at
+    /// clearing plus the treasury's spread share at close, blueprint §10) and the anti-dust minimum order notional
+    /// (valued at K). Same index in all arrays.
     struct Grad {
         address[] quotes;
-        uint256[] volumes;
+        uint256[] fees;
         uint256[] minNotionals;
         uint256[] seatObligations; // per-batch competitive notional a seat holder must post (blueprint §13 Q2 open)
     }
@@ -43,7 +44,8 @@ library DeployConfig {
     /// HyperEVM testnet, anvil, Ethereum, Sepolia). The whole table is part of the init code, so pass the same table on
     /// every chain. New chains are appended, so the earlier rows keep their index and their bytes; the core's address
     /// still changes with every row added (docs/IMPLEMENTATION_NOTES.md).
-    function build(Preset preset, address[7] memory treasury, address guardian, Grad[7] memory grad)
+    /// @param specials the Specials periphery (CREATE2 address, the same on every chain): the only lending caller
+    function build(Preset preset, address[7] memory treasury, address guardian, Grad[7] memory grad, address specials)
         internal
         pure
         returns (Confluere.Config memory c)
@@ -58,6 +60,13 @@ library DeployConfig {
         }
         c.maxOrdersPerSide = 128; // ~6.6M gas worst case: fits Monad blocks and HyperEVM big blocks
         c.maxBids = 64;
+        // autoSell (blueprint 3.6): defaulted asset is offered at 90% of K for 48 settlements of the next expiry's pool
+        // (deploy parameters, blueprint 13 Q3 still open). Lending ends 12 h before expiry (Thursday 20:00 UTC for the
+        // Friday 08:00 grid); 2 h on the daily grid, 10 min on the 1-hour demo grid.
+        c.autoSellDiscountBps = 9000;
+        c.autoSellTtl = 48;
+        c.lendCutoff = demo ? 10 minutes : preset == Preset.Daily ? 2 hours : 12 hours;
+        c.specials = specials;
         c.chains = new Confluere.ChainParams[](7);
         // windowBlocks: ~2h (demo: ~5 min). Monad measured ~0.3 s/block, HyperEVM small blocks 1 s, anvil 1 s,
         // Ethereum and Sepolia 12 s slots (a missed slot only lengthens the window). maxPauseBlocks: 7 days of blocks.
@@ -82,7 +91,7 @@ library DeployConfig {
         p.guardian = guardian;
         // Empty means no market can graduate on that chain (and vaults never invest there), and no order minimum.
         p.graduationQuotes = g.quotes;
-        p.graduationFees = g.volumes;
+        p.graduationFees = g.fees;
         p.minNotionalQuotes = g.quotes;
         p.minNotionals = g.minNotionals;
     }
