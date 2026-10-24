@@ -1,2 +1,2 @@
 Compiled from Confluere commit 80fb1df (forge build, solc 0.8.37, evm cancun) on 2026-10-24.
-Regenerate: cd ../Confluere/contracts && forge build && copy out/{Confluere.sol/Confluere,OrderLogic.sol/OrderLogic,ClearingLogic.sol/ClearingLogic,WindowLogic.sol/WindowLogic,MockERC20.sol/MockERC20}.json here.
+Regenerate: cd ../../contracts && forge build && copy out/{Confluere.sol/Confluere,OrderLogic.sol/OrderLogic,ClearingLogic.sol/ClearingLogic,WindowLogic.sol/WindowLogic,MockERC20.sol/MockERC20}.json here.
