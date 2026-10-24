@@ -142,7 +142,18 @@ interface IConfluere {
     function order(bytes32 poolId, uint64 orderId)
         external
         view
-        returns (address owner, uint8 side, uint96 units, uint96 limit, uint128 escrow, uint32 deadline, uint64 next);
+        returns (
+            address owner,
+            uint8 side,
+            uint8 flags,
+            uint96 units,
+            uint96 limit,
+            uint128 escrow,
+            uint32 deadline,
+            uint64 next
+        );
+    /// @notice Source pool of a rollover order (or of an autoSell order) resting in `poolId`; 0 for other orders.
+    function linkedPool(bytes32 poolId, uint64 orderId) external view returns (bytes32);
     function bookHead(bytes32 poolId, uint8 side) external view returns (uint64 head, uint32 count);
     function findHint(bytes32 poolId, uint8 side, uint96 limit) external view returns (uint64);
     function nextBatchAt(bytes32 poolId) external view returns (uint256);
