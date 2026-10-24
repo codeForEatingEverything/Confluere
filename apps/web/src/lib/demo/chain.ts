@@ -19,6 +19,7 @@
  *
  * Nothing here talks to a chain. Words in this file follow the contracts; the screens keep their own vocabulary.
  */
+import { nearestGridStrikes } from "@/lib/grid";
 import { ContractFunctionRevertedError, encodeErrorResult, parseAbi, zeroAddress, type Abi, type Address, type Hex } from "viem";
 import {
   Kind,
@@ -42,7 +43,7 @@ import {
   ncUnits,
   buyEscrow,
   vaultAbi,
-  isGridStrike,
+  strikeIndexOf,
 } from "@confluere/sdk";
 import { DEMO_ADDR, DEMO_GRID, demoDeploymentOf } from "./deployments";
 import { buyCost, sellOut, sellPrice } from "./sell";
@@ -113,6 +114,11 @@ type ChainSpec = {
 };
 
 const T0 = 1_790_000_000;
+
+/** Demo plan strikes are round numbers; v0.8 pools sit on the 1% log grid, so take the grid strike at or below. */
+function snapToGrid(k: bigint, qd: number): bigint {
+  return strikeIndexOf(k, qd) !== undefined ? k : (nearestGridStrikes(k, qd)?.lower ?? k);
+}
 
 function specOf(chainId: number): ChainSpec | undefined {
   const d = demoDeploymentOf(chainId);
@@ -660,8 +666,8 @@ function buildHistory(net: Net) {
     const m = spec.markets[plan.m]!;
     const qd = quoteDecOf(net, m.quote);
     const ad = net.tokens.get(lc(m.asset))?.decimals ?? 18;
-    const strike = toUnits(plan.strike, qd);
-    const id = poolId({ asset: m.asset, quote: m.quote, expiry: BigInt(plan.expiry), strike, kind: m.kind });
+    const strike = snapToGrid(toUnits(plan.strike, qd), qd);
+    const id = poolId({ asset: m.asset, quote: m.quote, expiry: BigInt(plan.expiry), strike, kind: m.kind, bandBps: m.band, cadence: 0 });
     const r = rng(st.seed ^ hashStr(id));
     const listed = Math.max(st.s0 - 30 * DAY, plan.expiry - 45 * DAY);
     const end = Math.min(st.s0, plan.expiry);
@@ -1368,10 +1374,10 @@ export function readCall(chainId: number, c: Call): unknown {
         const pid = args[0] as string;
         const id = Number(args[1]);
         const o = st.orders.find((x) => x.id === id && lc(x.pool) === lc(pid));
-        if (!o) return [zeroAddress, 0, 0n, 0n, 0n, 0, 0n];
+        if (!o) return [zeroAddress, 0, 0, 0n, 0n, 0n, 0, 0n];
         const xs = bookSide(st, pid, o.side);
         const nx = xs[xs.indexOf(o) + 1];
-        return [o.owner, o.side, o.units, o.limit, o.escrow, o.deadline, BigInt(nx?.id ?? 0)];
+        return [o.owner, o.side, 0, o.units, o.limit, o.escrow, o.deadline, BigInt(nx?.id ?? 0)];
       }
       case "rolloverSource": {
         const o = st.orders.find((x) => x.id === Number(args[1]) && lc(x.pool) === lc(args[0]));
@@ -1824,11 +1830,12 @@ function run(net: Net, me: Address, w: WriteCall) {
       }
       case "createPoolWithOptions": {
         const key = args[0] as { asset: Address; quote: Address; expiry: B; strike: B; kind: number };
-        const id = poolId({ asset: key.asset, quote: key.quote, expiry: BigInt(key.expiry), strike: BigInt(key.strike), kind: key.kind });
+        const cad = Number((args[3] as { cadence?: number } | undefined)?.cadence ?? 0);
+        const id = poolId({ asset: key.asset, quote: key.quote, expiry: BigInt(key.expiry), strike: BigInt(key.strike), kind: key.kind, bandBps: Number(args[2]), cadence: cad });
         if (st.pools[id]) revert("InvalidPool", fn);
         const e = Number(key.expiry);
         const onGrid = (e - DEMO_GRID.anchor) % DEMO_GRID.period === 0 && e > t && e <= t + DEMO_GRID.period * DEMO_GRID.maxExpiries;
-        if (!onGrid || !isGridStrike(BigInt(key.strike), DEMO_GRID.strikeSigDigits)) revert("InvalidParams", fn);
+        if (!onGrid || strikeIndexOf(BigInt(key.strike), quoteDecOf(net, key.quote)) === undefined) revert("InvalidParams", fn);
         const at = net.tokens.get(lc(key.asset));
         if (!at || !net.tokens.get(lc(key.quote))) revert("BadToken", fn);
         const band = Number(args[2]);

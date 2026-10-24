@@ -74,6 +74,7 @@ export type PoolRow = {
   minFill: bigint;
   firstLo: bigint;
   firstHi: bigint;
+  autoSell?: boolean; // v0.8 PoolOptions.autoSell (decision B); absent on a pre-v0.8 core
   graduated: boolean; // market passed four clean cycles; ungraduated pools are shown greyed with a notice
   expiryWindowEnd: bigint; // shared repayment window of this expiry (0 until the first pool of it matures)
   block: bigint; // block the row was read at (pause and window checks)
@@ -263,8 +264,9 @@ export async function walk(client: PublicClient, pid: Hex, side: Side, max = 128
   const out: BookOrder[] = [];
   while (id !== 0n && out.length < max) {
     const o = await client.readContract({ address: c, abi: confluereAbi, functionName: "order", args: [pid, id] });
-    out.push({ id, owner: o[0], side: o[1], units: o[2], limit: o[3], escrow: o[4], deadline: o[5] });
-    id = o[6];
+    // v0.8 Order: owner, side, flags, units, limit, escrow, deadline, next
+    out.push({ id, owner: o[0], side: o[1], units: o[3], limit: o[4], escrow: o[5], deadline: o[6] });
+    id = o[7];
   }
   return out;
 }
