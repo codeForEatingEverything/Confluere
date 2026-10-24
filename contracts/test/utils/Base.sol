@@ -5,7 +5,8 @@ import {Test} from "forge-std/Test.sol";
 import {Confluere} from "../../src/Confluere.sol";
 import {IConfluere} from "../../src/interfaces/IConfluere.sol";
 import {PoolKey, PoolKeyLib, Kind, Status} from "../../src/libraries/PoolKey.sol";
-import {GridConfig} from "../../src/libraries/Grid.sol";
+import {GridConfig, Grid} from "../../src/libraries/Grid.sol";
+import {IERC20Metadata} from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
 import {SELL, BUY, NC_SELL, NC_BUY, BID} from "../../src/libraries/OrderSet.sol";
 import {MockERC20} from "../../src/mocks/MockERC20.sol";
 
@@ -18,7 +19,10 @@ abstract contract Base is Test {
     uint64 internal constant WINDOW = 7200;
     uint64 internal constant E1 = ANCHOR + WEEK;
     uint64 internal constant E2 = ANCHOR + 2 * WEEK;
-    uint128 internal constant K = 3000e6; // 3000 USDC per ETH
+    uint128 internal constant K = 3_010_966_302; // ~3011 USDC per ETH: 1.01^805 on the log grid
+    int16 internal constant K_INDEX = 805;
+    uint128 internal constant K_HI = 3_102_201_591; // n = 808
+    uint128 internal constant K_LO = 2_808_382_632; // n = 798
     uint256 internal constant ONE = 1e18;
 
     Confluere internal core;
@@ -56,7 +60,7 @@ abstract contract Base is Test {
     }
 
     function _config() internal view virtual returns (Confluere.Config memory c) {
-        c.grid = GridConfig({anchor: ANCHOR, period: WEEK, batchInterval: BATCH, maxExpiries: 4, strikeSigDigits: 2});
+        c.grid = GridConfig({anchor: ANCHOR, period: WEEK, batchInterval: BATCH, maxExpiries: 4});
         c.maxOrdersPerSide = 8;
         c.maxBids = 4;
         c.chains = new Confluere.ChainParams[](1);
@@ -93,9 +97,17 @@ abstract contract Base is Test {
         return IConfluere.PoolOptions(0, 0, 0, false);
     }
 
-    /// @dev Creates a pool on any core instance (the strike index is derived here once the log grid needs it).
+    /// @dev Creates a pool on any core instance, passing the strike's canonical log-grid index.
     function _createKey(IConfluere c, PoolKey memory key, IConfluere.PoolOptions memory o) internal returns (bytes32) {
-        return c.createPool(key, o);
+        return c.createPool(key, _index(key), o);
+    }
+
+    function _index(PoolKey memory key) internal view returns (int16) {
+        // no external call when the quote is known, so vm.expectRevert still targets createPool
+        uint8 qd =
+            key.quote == address(usdc) ? 6 : key.quote == address(weth) ? 18 : IERC20Metadata(key.quote).decimals();
+        (int256 n,) = Grid.indexOf(key.strike, qd);
+        return int16(n);
     }
 
     function _create(uint128 strike, Kind kind, uint64 expiry) internal returns (bytes32) {
