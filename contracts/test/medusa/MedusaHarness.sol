@@ -55,10 +55,14 @@ contract MedusaHarness {
         usdc.mint(address(this), 10);
         weth.approve(address(core), type(uint256).max);
         usdc.approve(address(core), type(uint256).max);
-        pools[0] =
-            core.createPool(PoolKey(address(weth), address(usdc), ANCHOR + WEEK, 3000e6, Kind.American), 1000, 800);
-        pools[1] =
-            core.createPool(PoolKey(address(weth), address(usdc), ANCHOR + WEEK, 3000e6, Kind.European), 1500, 150);
+        pools[0] = core.createPool(
+            PoolKey(address(weth), address(usdc), ANCHOR + WEEK, 3000e6, Kind.American, 800, 0),
+            IConfluere.PoolOptions(0, 0, 0, false)
+        );
+        pools[1] = core.createPool(
+            PoolKey(address(weth), address(usdc), ANCHOR + WEEK, 3000e6, Kind.European, 150, 0),
+            IConfluere.PoolOptions(0, 0, 0, false)
+        );
         for (uint256 i; i < 3; ++i) {
             weth.mint(actors[i], 1e24);
             usdc.mint(actors[i], 1e15);
