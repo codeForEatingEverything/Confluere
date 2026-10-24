@@ -40,9 +40,7 @@ abstract contract VaultBase is Base {
         core.graduate(address(weth), address(usdc), Kind.American, E4);
         p5 = _cadence() == 0
             ? _create(K, Kind.American, E5)
-            : core.createPoolWithOptions(
-                _key(K, Kind.American, E5), 1000, 800, IConfluere.PoolOptions(_cadence(), 0, 0, 0)
-            );
+            : _createKey(core, _keyT(K, Kind.American, E5, 800, _cadence()), _noOpts());
 
         address[] memory as_ = new address[](1);
         as_[0] = address(weth);

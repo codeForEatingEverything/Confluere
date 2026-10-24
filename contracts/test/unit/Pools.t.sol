@@ -44,26 +44,35 @@ contract PoolsTest is Base {
         _create(98e16, Kind.European, E1); // pegged 0.98 in an 18-decimal quote
     }
 
-    function test_createPool_rejectsFeeAndBandOutsideWhitelist() public {
+    function test_createPool_rejectsBadBandOrCadence() public {
         vm.expectRevert(IConfluere.InvalidParams.selector);
-        core.createPool(_key(K, Kind.American, E1), 500, 800);
+        _createKey(core, _keyT(K, Kind.American, E1, 100, 0), _noOpts());
         vm.expectRevert(IConfluere.InvalidParams.selector);
-        core.createPool(_key(K, Kind.American, E1), 1000, 100);
+        _createKey(core, _keyT(K, Kind.American, E1, 800, 3), _noOpts());
+    }
+
+    function test_sameStrike_differentBand_coexist() public {
+        bytes32 a = _createKey(core, _keyT(K, Kind.American, E1, 800, 0), _noOpts());
+        bytes32 b = _createKey(core, _keyT(K, Kind.American, E1, 1500, 0), _noOpts());
+        bytes32 c = _createKey(core, _keyT(K, Kind.American, E1, 800, 1), _noOpts());
+        assertTrue(a != b && a != c && b != c);
+        assertEq(core.pool(b).key.bandBps, 1500);
+        assertEq(core.pool(c).batchInterval, 12 * BATCH);
     }
 
     function test_createPool_rejectsFeeOnTransfer() public {
         FeeOnTransferERC20 fot = new FeeOnTransferERC20();
         fot.mint(address(this), ONE);
         fot.approve(address(core), type(uint256).max);
-        PoolKey memory key = PoolKey(address(fot), address(usdc), E1, K, Kind.American);
+        PoolKey memory key = PoolKey(address(fot), address(usdc), E1, K, Kind.American, 800, 0);
         vm.expectRevert(IConfluere.BadToken.selector);
-        core.createPool(key, 1000, 800);
+        _createKey(core, key, _noOpts());
     }
 
     function test_createPool_rejectsSameToken() public {
-        PoolKey memory key = PoolKey(address(usdc), address(usdc), E1, K, Kind.American);
+        PoolKey memory key = PoolKey(address(usdc), address(usdc), E1, K, Kind.American, 800, 0);
         vm.expectRevert(IConfluere.BadToken.selector);
-        core.createPool(key, 1000, 800);
+        _createKey(core, key, _noOpts());
     }
 
     function test_placeOrder_escrows() public {

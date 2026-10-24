@@ -98,7 +98,7 @@ contract PeripheryTest is Base {
         g.bind(core); // only the named binder, and only once
         weth.approve(address(core2), type(uint256).max);
         usdc.approve(address(core2), type(uint256).max);
-        bytes32 p2 = core2.createPool(_key(K, Kind.American, E1), 1000, 800);
+        bytes32 p2 = _createKey(IConfluere(address(core2)), _key(K, Kind.American, E1), _noOpts());
 
         vm.prank(alice);
         g.approvePause(p2, 10, 1);

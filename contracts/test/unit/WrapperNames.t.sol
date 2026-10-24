@@ -18,7 +18,8 @@ contract WrapperNamesTest is Base {
         weth.approve(address(hourly), 1);
         usdc.approve(address(hourly), 1);
         // now = 2026-10-10 08:00 UTC; next hourly expiry 09:00
-        bytes32 id = hourly.createPool(_key(K, Kind.European, ANCHOR + 1 days + 1 hours), 1000, 800);
+        bytes32 id =
+            _createKey(IConfluere(address(hourly)), _key(K, Kind.European, ANCHOR + 1 days + 1 hours), _noOpts());
         ERC6909WrapperFactory f = new ERC6909WrapperFactory(IConfluere(address(hourly)));
         ERC6909Wrapper w = ERC6909Wrapper(f.create(uint256(id) | 1));
         assertEq(w.symbol(), "R-WETH-10OCT-0900");
@@ -43,7 +44,7 @@ contract WrapperNamesTest is Base {
         k.asset = address(t);
         t.mint(address(this), 1);
         t.approve(address(core), 1);
-        return ERC6909Wrapper(f.create(uint256(core.createPool(k, 1000, 800))));
+        return ERC6909Wrapper(f.create(uint256(_createKey(core, k, _noOpts()))));
     }
 }
 

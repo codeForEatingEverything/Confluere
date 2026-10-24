@@ -193,8 +193,7 @@ contract SeatsTest is Base {
 
     /// With a 6-hour long-tail pool as evidence, missing a 30-minute base batch is not a miss; a whole 6-hour batch is.
     function test_slashUsesTheEvidencePoolsBatchLength() public {
-        bytes32 slow =
-            core.createPoolWithOptions(_key(3100e6, Kind.American, E1), 1000, 1500, IConfluere.PoolOptions(1, 0, 0, 0));
+        bytes32 slow = _createKey(core, _keyT(3100e6, Kind.American, E1, 1500, 1), _noOpts());
         _buy(alice, PRICE, DEPOSIT);
         _post(alice, ONE, 2800e6);
         vm.warp(block.timestamp + 2 * BATCH); // two base batches without quoting
