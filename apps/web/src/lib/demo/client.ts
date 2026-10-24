@@ -7,7 +7,7 @@
 import { decodeAbiParameters, encodeAbiParameters, type Address, type Hex, type PublicClient } from "viem";
 import { chainMeta } from "../chains";
 import { isDemo } from "./mode";
-import { applyWrite, blockInfo, headBlock, indexBatches, indexOrders, indexPools, indexSeatQuotes, kuruMid, nativeBalance, readCall, spotPxRaw, type Call } from "./chain";
+import { applyWrite, blockInfo, headBlock, indexBatches, indexOrders, indexPools, indexSeatQuotes, kuruMid, nativeBalance, readCall, spotMid, spotPxRaw, type Call } from "./chain";
 
 const SPOT_PX = "0x0000000000000000000000000000000000000808";
 
@@ -69,6 +69,8 @@ export function demoApi(url: string): unknown {
       return indexSeatQuotes(chain);
     case "/api/ref/kuru":
       return { price: kuruMid(u.searchParams.get("symbol") ?? "") };
+    case "/api/ref/spot":
+      return { price: spotMid(u.searchParams.get("symbol") ?? ""), source: "demo" };
   }
   return undefined;
 }

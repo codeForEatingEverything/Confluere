@@ -72,6 +72,12 @@ describe("lib/native (pure)", () => {
     expect(spendableNative(1n, 998)).toBe(0n);
   });
 
+  it("ETH on Sepolia: the same coin row, a 0.01 ETH gas reserve", () => {
+    expect(nativeTokenOf(11155111)).toEqual({ address: "0x0000000000000000000000000000000000000000", symbol: "ETH", decimals: 18 });
+    expect(gasReserve(11155111)).toBe(10n ** 16n);
+    expect(spendableNative(E18, 11155111)).toBe(E18 - 10n ** 16n);
+  });
+
   it("paying in the coin puts the wrap first, then the approval, then the action; otherwise nothing changes", async () => {
     const pool = hypePool("h1") as never;
     const whype = { address: WHYPE, symbol: "WHYPE", decimals: 18 };

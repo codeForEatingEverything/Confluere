@@ -16,6 +16,8 @@ library DeployConfig {
     uint256 internal constant HYPEREVM = 999;
     uint256 internal constant HYPEREVM_TESTNET = 998;
     uint256 internal constant ANVIL = 31_337;
+    uint256 internal constant ETHEREUM = 1;
+    uint256 internal constant SEPOLIA = 11_155_111;
 
     /// @notice Per-chain quote-token parameters: graduation baseline (per-expiry volume, blueprint §10) and the
     /// anti-dust minimum order notional (valued at K). Same index in all three arrays.
@@ -38,8 +40,10 @@ library DeployConfig {
 
     /// @param preset grid and window preset (Demo shortens the windows too; Daily keeps the production windows)
     /// @param grad one entry per chain, in the order of the table below (Monad, Monad testnet, HyperEVM,
-    /// HyperEVM testnet, anvil). The whole table is part of the init code, so pass the same table on every chain.
-    function build(Preset preset, address[5] memory treasury, address guardian, Grad[5] memory grad)
+    /// HyperEVM testnet, anvil, Ethereum, Sepolia). The whole table is part of the init code, so pass the same table on
+    /// every chain. New chains are appended, so the earlier rows keep their index and their bytes; the core's address
+    /// still changes with every row added (docs/IMPLEMENTATION_NOTES.md).
+    function build(Preset preset, address[7] memory treasury, address guardian, Grad[7] memory grad)
         internal
         pure
         returns (Confluere.Config memory c)
@@ -60,13 +64,16 @@ library DeployConfig {
         }
         c.maxOrdersPerSide = 128; // ~6.6M gas worst case: fits Monad blocks and HyperEVM big blocks
         c.maxBids = 64;
-        c.chains = new Confluere.ChainParams[](5);
-        // windowBlocks: ~2h (demo: ~5 min). Monad measured ~0.3 s/block, HyperEVM small blocks 1 s, anvil 1 s.
+        c.chains = new Confluere.ChainParams[](7);
+        // windowBlocks: ~2h (demo: ~5 min). Monad measured ~0.3 s/block, HyperEVM small blocks 1 s, anvil 1 s,
+        // Ethereum and Sepolia 12 s slots (a missed slot only lengthens the window). maxPauseBlocks: 7 days of blocks.
         c.chains[0] = _chain(MONAD, demo ? 1000 : 24_000, 2_016_000, treasury[0], guardian, grad[0]);
         c.chains[1] = _chain(MONAD_TESTNET, demo ? 1000 : 24_000, 2_016_000, treasury[1], guardian, grad[1]);
         c.chains[2] = _chain(HYPEREVM, demo ? 300 : 7200, 604_800, treasury[2], guardian, grad[2]);
         c.chains[3] = _chain(HYPEREVM_TESTNET, demo ? 300 : 7200, 604_800, treasury[3], guardian, grad[3]);
         c.chains[4] = _chain(ANVIL, demo ? 300 : 7200, 604_800, treasury[4], guardian, grad[4]);
+        c.chains[5] = _chain(ETHEREUM, demo ? 25 : 600, 50_400, treasury[5], guardian, grad[5]);
+        c.chains[6] = _chain(SEPOLIA, demo ? 25 : 600, 50_400, treasury[6], guardian, grad[6]);
     }
 
     function _chain(uint256 id, uint64 window, uint64 maxPause, address treasury, address guardian, Grad memory g)
@@ -99,6 +106,8 @@ library DeployConfig {
         if (id == HYPEREVM) return "hyperevm";
         if (id == HYPEREVM_TESTNET) return "hyperevm-testnet";
         if (id == ANVIL) return "anvil";
+        if (id == ETHEREUM) return "ethereum";
+        if (id == SEPOLIA) return "sepolia";
         revert("unsupported chain");
     }
 }

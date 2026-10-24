@@ -11,7 +11,8 @@ import {DeployConfig} from "./DeployConfig.sol";
 
 /// @notice Opens the launch pools on the nearest expiry: per pair 2 strikes x 2 kinds. Monad testnet: shMON/WMON and
 /// WMON/USDC (8 pools). HyperEVM testnet: WHYPE/USDC and the extra pair USDC/WHYPE (8 pools; LST=0, no mintable LST
-/// there, so the extra pair is how the native coin is lent on that chain).
+/// there, so the extra pair is how the native coin is lent on that chain). Sepolia: wstETH/WETH and WETH/USDC, plus
+/// the extra pair wstETH/USDC.
 /// Optional extra pair (env EXTRA_ASSET, EXTRA_QUOTE, EXTRA_STRIKE_LOW / EXTRA_STRIKE_HIGH, EXTRA_BAND default 800 bps;
 /// none when EXTRA_ASSET is unset or zero): 2 strikes x 2 kinds more, listed after the launch pairs' pools, and recorded
 /// as `.pools.extraAsset` / `.pools.extraQuote` for Seed.s.sol and CreateVaults.s.sol.

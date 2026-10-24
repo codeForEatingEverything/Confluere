@@ -117,8 +117,8 @@ export function LoopCard({ pool, A, Q, embedded = false, top }: { pool: PoolRow;
           onMax={address && spendable ? () => setStart(toInput(spendable, A.decimals)) : undefined}
         />
         {short && stake && (
-          <p className="flex flex-wrap items-center gap-2 rounded-[var(--radius-control)] bg-warn-soft px-3 py-2 text-caption text-warn">
-            You need {A.symbol}. Stake {deployment ? Q.symbol.replace(/^W/, "") : ""} at FastLane (opens their site).
+          <p className="flex flex-wrap items-center gap-2 rounded-[var(--radius-control)] bg-warn-soft px-3 py-2 text-caption text-warn [overflow-wrap:anywhere]">
+            You need {A.symbol}. {stake.href ? <>Stake {deployment ? Q.symbol.replace(/^W/, "") : ""} at {stake.provider} (opens their site).</> : stake.note}
             {stake.href && (
               <a href={stake.href} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 font-medium underline underline-offset-2">
                 Open <ArrowUpRight size={14} strokeWidth={1.75} aria-hidden />
@@ -189,7 +189,7 @@ export function LoopCard({ pool, A, Q, embedded = false, top }: { pool: PoolRow;
       <ol className="mt-4 flex flex-wrap gap-x-4 gap-y-1 text-caption text-ink-3" aria-label="Each round">
         <li>1 Borrow {Q.symbol}</li>
         <li>2 Withdraw it from Portfolio</li>
-        <li>{staking ? "3 Stake at FastLane (their site)" : `3 Turn it into ${P.symbol} where you usually trade`}</li>
+        <li>{staking ? (stake ? `3 Stake at ${stake.provider}${stake.href ? " (their site)" : `: send ${Q.symbol.replace(/^W/, "")} to the ${A.symbol} contract`}` : "3 Stake it (outside Confluere)") : `3 Turn it into ${P.symbol} where you usually trade`}</li>
       </ol>
             </SummaryDetails>
             {plan && <p className="mt-3 text-caption text-ink-3">If you don&apos;t repay: you keep the {Q.symbol}, lenders keep the {A.symbol} you sold. No liquidation.</p>}
@@ -258,7 +258,7 @@ export function LoopCard({ pool, A, Q, embedded = false, top }: { pool: PoolRow;
       <ol className="mt-4 flex flex-wrap gap-x-4 gap-y-1 text-caption text-ink-3" aria-label="Each round">
         <li>1 Borrow {Q.symbol}</li>
         <li>2 Withdraw it from Portfolio</li>
-        <li>{staking ? "3 Stake at FastLane (their site)" : `3 Turn it into ${P.symbol} where you usually trade`}</li>
+        <li>{staking ? (stake ? `3 Stake at ${stake.provider}${stake.href ? " (their site)" : `: send ${Q.symbol.replace(/^W/, "")} to the ${A.symbol} contract`}` : "3 Stake it (outside Confluere)") : `3 Turn it into ${P.symbol} where you usually trade`}</li>
       </ol>
       <div className="mt-3">
         {!open ? (

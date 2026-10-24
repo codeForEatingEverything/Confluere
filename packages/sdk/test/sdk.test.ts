@@ -1,6 +1,24 @@
 import { describe, expect, it } from "vitest";
-import { existsSync, readFileSync } from "node:fs";
-import { poolId, rTokenId, cTokenId, Kind, quoteUp, quoteDown, spreadFee, isGridStrike, rolloverTopUp } from "../src/index.js";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import {
+  poolId,
+  rTokenId,
+  cTokenId,
+  Kind,
+  quoteUp,
+  quoteDown,
+  spreadFee,
+  isGridStrike,
+  rolloverTopUp,
+  chainById,
+  deployments,
+  logRange,
+  pollingOnly,
+  supportedChains,
+} from "../src/index.js";
+import { collect, render } from "../scripts/sync-deployments.mjs";
 
 describe("ids", () => {
   it("matches the pool ids the contracts created on anvil", () => {
@@ -55,5 +73,51 @@ describe("math", () => {
   });
   it("matches the rollover top-up rule", () => {
     expect(rolloverTopUp(scale, 3000_000000n, 2850_000000n, 500, scale)).toBe(150_000000n + 1000n);
+  });
+});
+
+describe("chains", () => {
+  it("serves Ethereum Sepolia and mainnet next to Monad and HyperEVM", () => {
+    expect(chainById(11155111)?.name).toBe("Sepolia");
+    expect(chainById(1)?.id).toBe(1);
+    expect(supportedChains.map((c) => c.id)).toEqual([10143, 998, 11155111, 143, 999, 1, 31337]);
+  });
+  it("polls only on HyperEVM", () => {
+    expect([998, 999].every(pollingOnly)).toBe(true);
+    expect([10143, 143, 11155111, 1, 31337].some(pollingOnly)).toBe(false);
+  });
+  it("caps getLogs at each chain's public-RPC limit", () => {
+    expect(logRange(10143)).toBe(100n);
+    expect(logRange(998)).toBe(1000n);
+    expect(logRange(11155111)).toBe(1000n);
+    expect(logRange(1)).toBe(1000n);
+    expect(logRange(31337)).toBe(5000n);
+  });
+});
+
+describe("deployments codegen", () => {
+  const write = (dir: string, name: string, d: object) => writeFileSync(join(dir, name), JSON.stringify(d));
+
+  it("leaves a chain without a deployments file undefined", () => {
+    if (existsSync(new URL("../../../deployments/sepolia.json", import.meta.url))) return; // deployed since
+    expect(deployments[11155111]).toBeUndefined();
+  });
+  it("picks up deployments/sepolia.json by its chainId once it exists", () => {
+    const dir = mkdtempSync(join(tmpdir(), "confluere-deployments-"));
+    try {
+      write(dir, "monad-testnet.json", { chainId: 10143, confluere: "0x01" });
+      expect(Object.keys(collect(dir))).toEqual(["10143"]);
+      write(dir, "sepolia.json", { chainId: 11155111, confluere: "0x02" });
+      const all = collect(dir);
+      expect(Object.keys(all)).toEqual(["10143", "11155111"]);
+      expect(render(all)).toContain(`"11155111": {`);
+      write(dir, "sepolia-copy.json", { chainId: 11155111 });
+      expect(() => collect(dir)).toThrow(/already read/);
+      rmSync(join(dir, "sepolia-copy.json"));
+      write(dir, "notes.json", { hello: 1 });
+      expect(() => collect(dir)).toThrow(/no numeric chainId/);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });

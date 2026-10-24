@@ -44,11 +44,16 @@ eth_rpc_url = "https://testnet-rpc.monad.xyz"
 [profile.hyperevm]
 eth_rpc_url = "https://rpc.hyperliquid-testnet.xyz/evm"
 
+[profile.sepolia]
+eth_rpc_url = "https://ethereum-sepolia-rpc.publicnode.com"
+
 [rpc_endpoints]
 monad_testnet = "https://testnet-rpc.monad.xyz"
 monad = "https://rpc.monad.xyz"
 hyperevm_testnet = "https://rpc.hyperliquid-testnet.xyz/evm"
 hyperevm = "https://rpc.hyperliquid.xyz/evm"
+sepolia = "https://ethereum-sepolia-rpc.publicnode.com"
+ethereum = "https://ethereum-rpc.publicnode.com"
 
 [lint]
 # Reviewed: remaining narrowing casts are bounded by values that were range-checked when escrowed.

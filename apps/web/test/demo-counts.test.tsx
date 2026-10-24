@@ -92,12 +92,19 @@ function dataset(chainId: number) {
 const touches = (chainId: number, ...a: string[]) => a.some((x) => x.toLowerCase() === launchTokensOf(chainId).native!.toLowerCase());
 const listed = (chainId: number, xs: { asset: string; quote: string }[]) => xs.length + xs.filter((p) => touches(chainId, p.asset, p.quote)).length;
 
+/** The three sample networks: name, coin, wrapped coin and staked coin. */
+const NETS: Record<number, { name: string; coin: string; wrapped: string; lst: string }> = {
+  998: { name: "HyperEVM", coin: "HYPE", wrapped: "WHYPE", lst: "kHYPE" },
+  10143: { name: "Monad", coin: "MON", wrapped: "WMON", lst: "shMON" },
+  11155111: { name: "Sepolia", coin: "ETH", wrapped: "WETH", lst: "wstETH" },
+};
+
 const sym = (chainId: number, a: string) => {
   const t = launchTokensOf(chainId);
   const x = a.toLowerCase();
-  if (x === t.native?.toLowerCase()) return chainId === 998 ? "WHYPE" : "WMON";
+  if (x === t.native?.toLowerCase()) return NETS[chainId]!.wrapped;
   if (x === t.usdc?.toLowerCase()) return "USDC";
-  if (x === t.lst?.toLowerCase()) return chainId === 998 ? "kHYPE" : "shMON";
+  if (x === t.lst?.toLowerCase()) return NETS[chainId]!.lst;
   return "?";
 };
 
@@ -163,8 +170,36 @@ describe("the demo's sample set", () => {
     expect(sym(10143, s.loopOpen[0]!.asset)).toBe("shMON");
   });
 
+  it("Sepolia: WETH / USDC (both styles), wstETH / WETH (pegged loop) and wstETH / USDC (both styles), several maturities each", () => {
+    setChainChoice(11155111);
+    const s = dataset(11155111);
+    const byMarket = (asset: string, quote: string, kind: number) => s.open.filter((p) => sym(11155111, p.asset) === asset && sym(11155111, p.quote) === quote && p.kind === kind);
+    expect(s.markets.size).toBe(6);
+    expect(byMarket("WETH", "USDC", Kind.American)).toHaveLength(15);
+    expect(byMarket("WETH", "USDC", Kind.European)).toHaveLength(4);
+    expect(byMarket("wstETH", "WETH", Kind.American)).toHaveLength(8);
+    expect(byMarket("wstETH", "WETH", Kind.European)).toHaveLength(1);
+    expect(byMarket("wstETH", "USDC", Kind.American)).toHaveLength(8);
+    expect(byMarket("wstETH", "USDC", Kind.European)).toHaveLength(4);
+    expect(s.open).toHaveLength(40);
+    expect(s.notClosed).toHaveLength(41);
+    expect(s.pools).toHaveLength(42);
+    // the real Sepolia tokens with made-up contracts (no live deployment yet)
+    expect(launchTokensOf(11155111)).toEqual({ lst: "0xB82381A3fBD3FaFA77B3a7bE693342618240067b", native: "0xfFf9976782d46CC05630D1f6eBAb18b2324d6B14", usdc: "0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238" });
+    const pairs = new Set(s.pools.map((p) => [sym(11155111, p.asset), sym(11155111, p.quote)].sort().join("/")));
+    expect([...pairs].sort()).toEqual(["USDC/WETH", "USDC/wstETH", "WETH/wstETH"]);
+    expect(s.loopOpen).toHaveLength(8 + 1 + 15 + 4);
+    expect(sym(11155111, s.loopOpen[0]!.asset)).toBe("wstETH");
+    // wstETH answers like Lido's contract (stEthPerToken, not ERC-4626), at Sepolia's own rate
+    const lst = launchTokensOf(11155111).lst!;
+    const rate = Number(readCall(11155111, { address: lst, functionName: "stEthPerToken", args: [] }) as bigint) / 1e18;
+    expect(rate).toBeGreaterThan(1.03);
+    expect(rate).toBeLessThan(1.045);
+    expect(() => readCall(11155111, { address: lst, functionName: "convertToAssets", args: [10n ** 18n] })).toThrow(/reverted/);
+  });
+
   it("selectors offer exactly the tokens of open markets (plus the coin next to its wrapped token)", async () => {
-    for (const chainId of [998, 10143]) {
+    for (const chainId of [998, 10143, 11155111]) {
       setChainChoice(chainId);
       const s = dataset(chainId);
       const { result, unmount } = renderHook(() => usePools(), { wrapper });
@@ -178,10 +213,10 @@ describe("the demo's sample set", () => {
       const fromOpen = new Set(s.open.map((p) => `${p.asset}/${p.quote}`.toLowerCase()));
       expect(offered).toEqual(fromOpen);
       const tokens = new Set(pairs.flatMap((p) => [sym(chainId, p.asset), sym(chainId, p.quote)]));
-      expect([...tokens].sort()).toEqual(chainId === 998 ? ["USDC", "WHYPE", "kHYPE"] : ["USDC", "WMON", "shMON"]);
+      expect([...tokens].sort()).toEqual(["USDC", NETS[chainId]!.wrapped, NETS[chainId]!.lst].sort());
       // the selectors: the tokens of open markets on each side, plus the coin (HYPE / MON) wherever its wrapped token is
       const wrapped = launchTokensOf(chainId).native!;
-      const coin = chainId === 998 ? "HYPE" : "MON";
+      const coin = NETS[chainId]!.coin;
       const name = (a: string) => (isNative(a) ? coin : sym(chainId, a));
       const expected = (side: "asset" | "quote") => {
         const xs = [...new Set(s.open.map((p) => sym(chainId, p[side])))];
@@ -195,14 +230,14 @@ describe("the demo's sample set", () => {
       // the coin row sits right before its wrapped token
       expect(collateral[collateral.indexOf(coin) + 1]).toBe(sym(chainId, wrapped));
       // all of the network's tokens show up across the two sides: HYPE, WHYPE, USDC, kHYPE / MON, WMON, shMON, USDC
-      expect([...new Set([...collateral, ...loan])].sort()).toEqual(chainId === 998 ? ["HYPE", "USDC", "WHYPE", "kHYPE"] : ["MON", "USDC", "WMON", "shMON"]);
+      expect([...new Set([...collateral, ...loan])].sort()).toEqual([coin, "USDC", NETS[chainId]!.wrapped, NETS[chainId]!.lst].sort());
     }
   });
 });
 
 describe("every page lists the whole sample set", () => {
-  for (const chainId of [998, 10143]) {
-    const net = chainId === 998 ? "HyperEVM" : "Monad";
+  for (const chainId of [998, 10143, 11155111]) {
+    const net = NETS[chainId]!.name;
 
     it(`${net}: Borrow and Loop list three live maturities per pair at most, each touching the wrapped coin twice`, async () => {
       setChainChoice(chainId);
@@ -244,11 +279,11 @@ describe("every page lists the whole sample set", () => {
       const names =
         chainId === 998
           ? ["HYPE Pegged vault", "WHYPE Pegged vault", "HYPE Lending vault", "WHYPE Lending vault", "USDC Conservative vault", "USDC High-yield vault"]
-          : ["MON Pegged vault", "WMON Pegged vault", "USDC Conservative vault", "USDC High-yield vault"];
+          : [`${NETS[chainId]!.coin} Pegged vault`, `${NETS[chainId]!.wrapped} Pegged vault`, "USDC Conservative vault", "USDC High-yield vault"];
       await waitFor(() => expect(rows("vaults")).toBe(names.length), { timeout: 8000 });
       await waitFor(() => expect(screen.getAllByTestId("vault-name").map((n) => n.textContent).sort()).toEqual([...names].sort()), { timeout: 8000 });
       // the coin's row: the coin's logo without the wrapped mark; the wrapped row: the same logo with the W mark; USDC its own
-      const coin = chainId === 998 ? "HYPE" : "MON";
+      const coin = NETS[chainId]!.coin;
       for (const row of screen.getAllByTestId("vaults-row")) {
         const n = row.querySelector('[data-testid="vault-name"]')!.textContent ?? "";
         const img = row.querySelector("img")?.getAttribute("src");
@@ -268,8 +303,8 @@ describe("every page lists the whole sample set", () => {
 
     it(`${net}: every vault's drawer reads like its list row (title, icon, deposit token, amounts)`, async () => {
       setChainChoice(chainId);
-      const coin = chainId === 998 ? "HYPE" : "MON";
-      const wrapped = chainId === 998 ? "WHYPE" : "WMON";
+      const coin = NETS[chainId]!.coin;
+      const wrapped = NETS[chainId]!.wrapped;
       const { result, unmount } = renderHook(() => useVaults(), { wrapper });
       await waitFor(() => expect(result.current.data?.length).toBeGreaterThan(0), { timeout: 6000 });
       const vaults = result.current.data!;

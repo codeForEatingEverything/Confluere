@@ -23,6 +23,12 @@ const KNOWN: Record<number, string> = { 1: "Ethereum", 10: "OP Mainnet", 56: "BN
 /** Name of a common EVM chain id, for "Your wallet is on Ethereum" (no full chain list in the bundle). */
 const anyChainName = (id: number | undefined) => (id !== undefined && KNOWN[id]) || "another network";
 
+/** The menu's second line for a network: its open markets, or that it has no deployment yet. */
+export function marketLine(deployed: boolean, open: number | undefined): string {
+  if (!deployed) return "Not deployed yet";
+  return open === undefined ? "Checking markets…" : open > 0 ? `${open} market${open > 1 ? "s" : ""} open` : "No open markets";
+}
+
 /** Markets with a maturity still ahead, per chain, from the server index (no chain reads, so the menu opens instantly). */
 export function openMarketCount(idx: PoolIndex | undefined, nowS: number): number | undefined {
   if (!idx) return undefined;
@@ -45,7 +51,7 @@ function useMarketCounts(chains: ChainMeta[]) {
     })),
   });
   const now = Date.now() / 1000;
-  return chains.map((c, i) => ({ chain: c, open: openMarketCount(qs[i]?.data, now) }));
+  return chains.map((c, i) => ({ chain: c, deployed: !!deploymentOf(c.id), open: openMarketCount(qs[i]?.data, now) }));
 }
 
 /** Chain health in one line, for the bottom of the menu. */
@@ -64,13 +70,14 @@ function HealthLine() {
 }
 
 /**
- * Network switch: works without a wallet; with one, asks the wallet to follow. The pill itself carries the wallet's
+ * Network switch: works without a wallet; with one, asks the wallet to follow. Every served network is listed, one
+ * without a deployment yet (Sepolia before its deploy) too: picking it shows the "not deployed yet" page. The pill itself carries the wallet's
  * wrong-network state ("Wrong network", warn colour) and a spinner while the wallet is asked.
  */
 export function NetworkMenu({ compact }: { compact?: boolean }) {
   const { chainId, meta, walletOnOtherChain, walletChainId } = useActiveChain();
   const { switchNetwork, switching } = useSwitchNetwork();
-  const rows = useMarketCounts(ENABLED.filter((c) => !!deploymentOf(c.id)));
+  const rows = useMarketCounts(ENABLED);
   return (
     <Menu
       label="Network"
@@ -99,7 +106,7 @@ export function NetworkMenu({ compact }: { compact?: boolean }) {
     >
       {(close) => (
         <div className="w-[272px]">
-          {rows.map(({ chain: c, open }) => {
+          {rows.map(({ chain: c, deployed, open }) => {
             const on = c.id === chainId;
             return (
               <button
@@ -120,7 +127,7 @@ export function NetworkMenu({ compact }: { compact?: boolean }) {
                     {c.name}
                     {c.testnet && <span className="ml-1.5 text-caption font-normal text-ink-3">Testnet</span>}
                   </span>
-                  <span className="block text-caption text-ink-3">{open === undefined ? "Checking markets…" : open > 0 ? `${open} market${open > 1 ? "s" : ""} open` : "No open markets"}</span>
+                  <span className="block text-caption text-ink-3">{marketLine(deployed, open)}</span>
                 </span>
                 {on && <Check size={16} strokeWidth={1.75} className="text-brand" aria-hidden />}
               </button>

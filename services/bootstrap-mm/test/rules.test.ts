@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { exitReason, quote, RUN_S } from "../src/rules.js";
+import { classOf, exitReason, isPoolClass, quote, RUN_S } from "../src/rules.js";
 
 const base = {
   cls: "main" as const,
@@ -26,6 +26,35 @@ describe("bootstrap rules", () => {
     expect(quote({ ...base, remainingQuote: 0n })).toBeNull();
     expect(quote({ ...base, endAt: 50 })).toBeNull();
     expect(quote({ ...base, lastClearingPrice: 0n })).toBeNull();
+  });
+});
+
+describe("bootstrap bands by pair", () => {
+  // Sepolia: wstETH (Lido), WETH (Uniswap's canonical), USDC (Circle)
+  const WSTETH = "0xB82381A3fBD3FaFA77B3a7bE693342618240067b";
+  const WETH = "0xfFf9976782d46CC05630D1f6eBAb18b2324d6B14";
+  const USDC = "0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238";
+  const sepolia = { lst: WSTETH, native: WETH };
+  it("quotes wstETH / WETH in the pegged band and both USDC markets in the main band", () => {
+    expect(classOf(WSTETH, WETH, sepolia)).toBe("pegged");
+    expect(classOf(WSTETH.toLowerCase(), WETH.toUpperCase().replace("0X", "0x"), sepolia)).toBe("pegged");
+    expect(classOf(WETH, USDC, sepolia)).toBe("main");
+    expect(classOf(WSTETH, USDC, sepolia)).toBe("main");
+    expect(classOf(WETH, WSTETH, sepolia)).toBe("main"); // the reverse pair is not the LST loop
+  });
+  it("has no pegged market without an LST (HyperEVM testnet) or without pool addresses", () => {
+    const ZERO = "0x0000000000000000000000000000000000000000";
+    expect(classOf(ZERO, WETH, { lst: ZERO, native: WETH })).toBe("main");
+    expect(classOf(WSTETH, WETH)).toBe("main");
+  });
+  it("prices a wstETH / WETH bid 0.1% under the last clear (about 1.0377 WETH per wstETH)", () => {
+    const last = 1_037_700_000_000_000_000n;
+    const q = quote({ ...base, cls: classOf(WSTETH, WETH, sepolia), lastClearingPrice: last, perBatchQuote: last })!;
+    expect(q.limit).toBe((last * 9_990n) / 10_000n);
+  });
+  it("accepts only the two published classes from POOLS", () => {
+    expect(isPoolClass("pegged") && isPoolClass("main")).toBe(true);
+    expect(isPoolClass("tight") || isPoolClass("toString") || isPoolClass("__proto__")).toBe(false);
   });
 });
 

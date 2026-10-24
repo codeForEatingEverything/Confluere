@@ -9,11 +9,11 @@ import {Kind} from "../src/libraries/PoolKey.sol";
 import {DeployConfig} from "./DeployConfig.sol";
 
 /// @notice Deploys one LP receipt token (SeatLPToken) per market of the pools in deployments/<chain>.json (CREATE2,
-/// skipped when already deployed) and records them under .seatLPTokens as "asset-quote-kind" => token.
+/// skipped when already deployed) and records them under .seatLPTokens as "asset-quote-kind" => token. Reads and writes
+/// DEPLOYMENTS_FILE when set (the staging copy of scripts/deploy-testnet.sh, step seatlp).
 contract DeploySeatLP is Script {
     function run() external {
-        string memory path =
-            string.concat(vm.projectRoot(), "/../deployments/", DeployConfig.chainName(block.chainid), ".json");
+        string memory path = DeployConfig.deploymentsFile(vm);
         string memory json = vm.readFile(path);
         IConfluere core = IConfluere(vm.parseJsonAddress(json, ".confluere"));
         SeatRegistry reg = SeatRegistry(vm.parseJsonAddress(json, ".seatRegistry"));

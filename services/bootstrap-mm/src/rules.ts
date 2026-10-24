@@ -11,6 +11,20 @@ export type PoolClass = "pegged" | "main";
 
 export const SPREAD_BPS: Record<PoolClass, bigint> = { pegged: 10n, main: 50n };
 
+export const isPoolClass = (s: string): s is PoolClass => Object.hasOwn(SPREAD_BPS, s);
+
+/**
+ * Band of a market named "poolId:auto" in POOLS (a bare poolId is main): a liquid staking token lent against its own
+ * native coin is pegged (shMON / WMON on Monad, wstETH / WETH on Sepolia: `pools.lst` / `pools.native` of the
+ * deployment); every other pair is main (WETH / USDC and wstETH / USDC on Sepolia, WMON / USDC, USDC / WHYPE). A deployment without an LST
+ * (HyperEVM testnet, lst = 0) has no pegged market.
+ */
+export function classOf(asset: string, quote: string, pair?: { lst: string; native: string }): PoolClass {
+  const eq = (a: string, b: string) => a.toLowerCase() === b.toLowerCase();
+  if (!pair || /^0x0{40}$/i.test(pair.lst)) return "main";
+  return eq(asset, pair.lst) && eq(quote, pair.native) ? "pegged" : "main";
+}
+
 export type Inputs = {
   cls: PoolClass;
   lastClearingPrice: bigint; // 0 = no reference yet

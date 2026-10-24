@@ -41,12 +41,15 @@ contract Deploy is Script {
         address usdc;
     }
 
-    uint256[5] internal CHAIN_IDS = [
+    /// @dev The order of DeployConfig.build's table; new chains are appended.
+    uint256[7] internal CHAIN_IDS = [
         DeployConfig.MONAD,
         DeployConfig.MONAD_TESTNET,
         DeployConfig.HYPEREVM,
         DeployConfig.HYPEREVM_TESTNET,
-        DeployConfig.ANVIL
+        DeployConfig.ANVIL,
+        DeployConfig.ETHEREUM,
+        DeployConfig.SEPOLIA
     ];
 
     struct Periphery {
@@ -67,15 +70,15 @@ contract Deploy is Script {
         vm.startBroadcast();
         (, address deployer,) = vm.readCallers();
         Tokens memory t = mocks ? _mockTokens(salt) : Tokens(address(0), address(0), address(0));
-        DeployConfig.Grad[5] memory grad = _grad(mocks, t);
-        // The core's treasury on each chain is that chain's SeatRegistry; precompute all five so the core's init
+        DeployConfig.Grad[7] memory grad = _grad(mocks, t);
+        // The core's treasury on each chain is that chain's SeatRegistry; precompute every row's so the core's init
         // code (and address) is the same everywhere.
-        address[5] memory registries;
-        for (uint256 i; i < 5; ++i) {
+        address[7] memory registries;
+        for (uint256 i; i < CHAIN_IDS.length; ++i) {
             registries[i] = vm.computeCreate2Address(salt, keccak256(_registryInit(deployer, grad[i])));
         }
         SeatRegistry reg = _deployRegistry(salt, deployer, grad);
-        for (uint256 i; i < 5; ++i) {
+        for (uint256 i; i < CHAIN_IDS.length; ++i) {
             if (CHAIN_IDS[i] == block.chainid) require(address(reg) == registries[i], "registry address mismatch");
         }
         Guardian g = _deployGuardian(salt, deployer);
@@ -124,8 +127,9 @@ contract Deploy is Script {
     /// or mintable mock tokens on a production chain, nor leave a mainnet with a single-key guardian.
     function _guards(DeployConfig.Preset preset, bool mocks) internal view {
         uint256 id = block.chainid;
-        bool mainnet = id == DeployConfig.MONAD || id == DeployConfig.HYPEREVM;
-        bool test = id == DeployConfig.MONAD_TESTNET || id == DeployConfig.HYPEREVM_TESTNET || id == DeployConfig.ANVIL;
+        bool mainnet = id == DeployConfig.MONAD || id == DeployConfig.HYPEREVM || id == DeployConfig.ETHEREUM;
+        bool test = id == DeployConfig.MONAD_TESTNET || id == DeployConfig.HYPEREVM_TESTNET
+            || id == DeployConfig.SEPOLIA || id == DeployConfig.ANVIL;
         require(preset != DeployConfig.Preset.Demo || test, "demo: testnets and anvil only");
         require(preset != DeployConfig.Preset.Daily || test, "daily grid: testnets and anvil only");
         require(!mocks || id == DeployConfig.ANVIL, "mocks: anvil only");
@@ -159,6 +163,9 @@ contract Deploy is Script {
                 if (block.chainid == DeployConfig.HYPEREVM || block.chainid == DeployConfig.HYPEREVM_TESTNET) {
                     require(w == 7200, "HyperEVM window must be 7,200 blocks");
                 }
+                if (block.chainid == DeployConfig.ETHEREUM || block.chainid == DeployConfig.SEPOLIA) {
+                    require(w == 600, "Ethereum window must be 600 blocks");
+                }
             }
         }
         require(found, "no chain parameters for this chain id");
@@ -189,12 +196,12 @@ contract Deploy is Script {
         );
     }
 
-    function _deployRegistry(bytes32 salt, address deployer, DeployConfig.Grad[5] memory grad)
+    function _deployRegistry(bytes32 salt, address deployer, DeployConfig.Grad[7] memory grad)
         internal
         returns (SeatRegistry reg)
     {
         DeployConfig.Grad memory g;
-        for (uint256 i; i < 5; ++i) {
+        for (uint256 i; i < CHAIN_IDS.length; ++i) {
             if (CHAIN_IDS[i] == block.chainid) g = grad[i];
         }
         reg = SeatRegistry(vm.computeCreate2Address(salt, keccak256(_registryInit(deployer, g))));
@@ -224,8 +231,8 @@ contract Deploy is Script {
 
     /// @dev Demo: the two quote tokens graduate after 1 native / 10 USD of volume per expiry, on every chain; the
     /// smallest order is worth 0.1 native / 1 USD at K.
-    function _grad(bool mocks, Tokens memory t) internal view returns (DeployConfig.Grad[5] memory g) {
-        for (uint256 i; i < 5; ++i) {
+    function _grad(bool mocks, Tokens memory t) internal view returns (DeployConfig.Grad[7] memory g) {
+        for (uint256 i; i < CHAIN_IDS.length; ++i) {
             if (mocks) {
                 g[i].quotes = new address[](2);
                 g[i].volumes = new uint256[](2);

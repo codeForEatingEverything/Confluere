@@ -1,11 +1,15 @@
 # Shared by scripts/deploy-testnet.sh and scripts/roll-testnet.sh (sourced, not run). Expects ROOT and the chain
-# name (monad | hyperevm) as $1 of testnet_env; works from $ROOT/contracts.
+# name (monad | hyperevm | sepolia) as $1 of testnet_env; works from $ROOT/contracts.
 #
 # Real tokens (verified on-chain 2026-10-12):
 #   Monad testnet:    WMON 0xFb8b…C541 (deposit() wraps MON), USDC 0x534b…43A3 (Circle faucet),
 #                     shMON 0x282B…45C9 (FastLane, deposit(assets, receiver) payable; 1 shMON ≈ 12.9 MON)
 #   HyperEVM testnet: WHYPE 0x5555…5555 (deposit()), USDC 0x2B33…D8Ab (Circle faucet). No mintable LST, so no loop pair;
 #                     instead the extra pair USDC/WHYPE (borrowers post USDC for HYPE) is how the native coin is lent.
+# Verified 2026-10-23 (Sepolia reads and an anvil fork):
+#   Ethereum Sepolia: WETH 0xfFf9…6B14 (Uniswap's canonical Sepolia WETH, deposit()), USDC 0x1c7D…7238 (Circle faucet),
+#                     wstETH 0xB823…067b (Lido; sending ETH to it stakes and wraps in one call, 1 wstETH ≈ 1.0377 ETH),
+#                     stETH 0x3e3F…40Af (submit(address) payable).
 
 export PATH="$PATH:$HOME/.foundry/bin"
 M_WMON=0xFb8bf4c1CC7a94c73D209a149eA2AbEa852BC541
@@ -13,11 +17,23 @@ M_USDC=0x534b2f3A21130d7a60830c2Df862319e593943A3
 M_SHMON=0x282BdDFF5e58793AcAb65438b257Dbd15A8745C9
 H_WHYPE=0x5555555555555555555555555555555555555555
 H_USDC=0x2B3370eE501B4a559b57D449569354196457D8Ab
+S_WETH=0xfFf9976782d46CC05630D1f6eBAb18b2324d6B14
+S_USDC=0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238
+S_WSTETH=0xB82381A3fBD3FaFA77B3a7bE693342618240067b
 ZERO=0x0000000000000000000000000000000000000000
 # CREATE2 salt of the testnet deployment (Deploy.s.sol SALT). The SeatRegistry's address does not depend on the grid,
 # so a redeploy with the same GRAD rows but another grid needs a new salt (the registry of the old salt is bound to the
 # old core). 0xc0f1: the 2026-10-12 demo-grid core; 0xc0f2: the 2026-10-13 daily-grid core.
+# Adding the Ethereum and Sepolia rows (2026-10-23) changed the core's init code, so the core address of 0xc0f2 changed
+# too, while the SeatRegistry addresses of Monad testnet and HyperEVM testnet did not: a Deploy re-run there on 0xc0f2
+# would simulate a new core, then stop at "registry bound to another core" before broadcasting (the live 0x7E02…b1f7
+# deployments stay as they are; their later steps and scripts/roll-testnet.sh do not run Deploy). So the seven-row
+# table gets its own salt, TESTNET_SALT_NEXT (0xc0f3): Sepolia deploys on it now (testnet_params sets TESTNET_SALT for
+# it), and Monad and HyperEVM move to it only when the founder approves their redeploy
+# (SALT=$TESTNET_SALT_NEXT scripts/deploy-testnet.sh monad): with the same GRAD rows, deployer and grid all three then
+# share one core address again. docs/IMPLEMENTATION_NOTES.md records this as a pending deviation.
 TESTNET_SALT=0x000000000000000000000000000000000000000000000000000000000000c0f2
+TESTNET_SALT_NEXT=0x000000000000000000000000000000000000000000000000000000000000c0f3
 LOG=$(mktemp "${TMPDIR:-/tmp}/confluere-step.XXXXXX")
 BIG=0 # 1 while HyperEVM big blocks may be on for this account
 # Seeded books (Seed.s.sol book layout, SEED_APR_BPS > 0): priced by time to expiry at SEED_APR_BPS (10% a year), a
@@ -30,9 +46,11 @@ TRADE_ROUNDS=${TRADE_ROUNDS:-3}
 MATURITY_DAYS=${MATURITY_DAYS:-"1 7 14"}
 
 # Chain parameters without touching the network: RPC, strikes, the deployments file, HyperEVM's gas flags. Tokens
-# default to the real ones above. scripts/test/grad-seed.test.sh reads them too.
+# default to the real ones above. scripts/test/grad-seed.test.sh reads them too. LST_FUND=receive: sending native coin
+# to the LST contract mints it (preflight's FUND=1 uses that); LST_HINT: how to get the LST by hand.
 testnet_params() {
   CHAIN=$1
+  LST_FUND="" LST_HINT=""
   case "$CHAIN" in
     monad)
       R=https://testnet-rpc.monad.xyz
@@ -51,6 +69,7 @@ testnet_params() {
       # (the wallet holds little shMON; neither pair has to graduate)
       export SEED_UNIT_BPS=${SEED_UNIT_BPS:-200} LST_SEED_UNIT_BPS=${LST_SEED_UNIT_BPS:-20}
       export EXTRA_SEED_UNIT_BPS=${EXTRA_SEED_UNIT_BPS:-50}
+      LST_HINT="FastLane deposit(assets, receiver), ~12.9 MON per shMON"
       EXTRA=()
       ;;
     hyperevm)
@@ -71,6 +90,43 @@ testnet_params() {
       export SEED_CHUNK=${SEED_CHUNK:-6}
       EXTRA=(--disable-block-gas-limit)                       # big blocks toggled per step
       export FOUNDRY_GAS_LIMIT=30000000
+      ;;
+    sepolia)
+      R=${SEPOLIA_RPC:-https://ethereum-sepolia-rpc.publicnode.com} # SEPOLIA_RPC=https://sepolia.drpc.org also works
+      NAME=sepolia
+      export LST=$S_WSTETH NATIVE=$S_WETH USDC=$S_USDC
+      # The seven-row chain table's salt (see TESTNET_SALT above): a new core address, apart from the live testnets.
+      TESTNET_SALT=$TESTNET_SALT_NEXT
+      # One buy-back price per pair at about 90% of the collateral's normal market value on the 2-digit grid
+      # (2026-10-23). wstETH is worth what it redeems for on this chain, 1.0377 ETH (stEthPerToken: unlike shMON's,
+      # the Sepolia rate is what staking pays here): 0.93 WETH (90%). ETH ≈ 2375 USD (Ethereum mainnet Chainlink
+      # ETH/USD; the Sepolia DEX books are testnet artefacts): 2100 USDC per WETH (88%).
+      export LST_STRIKE_HIGH=930000000000000000 LST_STRIKE_LOW=930000000000000000 # 0.93 WETH per wstETH
+      export USD_STRIKE_LOW=2100000000 USD_STRIKE_HIGH=2100000000                # 2100 USDC per WETH
+      # Extra pair wstETH/USDC (as shMON/USDC on Monad): 1.0377 x 2375 = 2465 USD, 2200 USDC per wstETH (89%).
+      export EXTRA_ASSET=$S_WSTETH EXTRA_QUOTE=$S_USDC EXTRA_BAND=800
+      export EXTRA_STRIKE_LOW=2200000000 EXTRA_STRIKE_HIGH=2200000000
+      # Seed units, small because faucet Sepolia ETH and USDC are scarce: WETH/USDC and wstETH/USDC 0.0001 (the
+      # smallest unit; ~0.21 USDC per order clears the 0.001 USDC graduation row many times over); wstETH/WETH
+      # 0.0012 wstETH (0.00112 WETH at K, just above the 0.001 WETH order minimum; like shMON/WMON it need not
+      # graduate). The launch run (3 expiries, 3 trade rounds) needs ~0.04 wstETH, ~0.04 WETH and ~13 USDC.
+      export SEED_UNIT_BPS=${SEED_UNIT_BPS:-1} LST_SEED_UNIT_BPS=${LST_SEED_UNIT_BPS:-12}
+      export EXTRA_SEED_UNIT_BPS=${EXTRA_SEED_UNIT_BPS:-1}
+      # Router.placeOrders batches of 24 orders: ~10M gas each at Amsterdam's storage prices (48 took 20M on a fork).
+      # Sepolia does take transactions above 2^24 gas (30M-limit transactions land, 2026-10-23); smaller batches just
+      # lose less to a dropped one
+      export SEED_CHUNK=${SEED_CHUNK:-24}
+      # native ETH kept for gas by preflight's FUND=1 (pools, seed, trade rounds, vaults and later rolls)
+      export GAS_RESERVE=${GAS_RESERVE:-50000000000000000}
+      LST_FUND=receive
+      LST_HINT="send Sepolia ETH to wstETH $S_WSTETH (its receive() stakes and wraps, ~1.04 ETH per wstETH), or FUND=1"
+      # Sepolia runs Amsterdam's state-creation pricing (~1,550 gas per byte of deployed code, 31M gas for a 20 KB
+      # contract; checked with eth_estimateGas 2026-10-23), which forge's local simulation (evm_version cancun) does
+      # not know: its gas limits ran out on a fork. Skip it, so forge asks the node to estimate each transaction
+      # (--slow sends them one by one, so each estimate sees the previous ones). The script itself still runs first.
+      # Public Sepolia RPCs drop some of the thousands of storage reads a tick or trade script makes (each drop was a
+      # FatalExternalError before anything was sent, 2026-10-24): let forge retry a failed fork read.
+      EXTRA=(--skip-simulation --fork-retries 12 --fork-retry-backoff 2000)
       ;;
     *) return 1 ;;
   esac
@@ -97,16 +153,23 @@ testnet_env() {
   CHAIN_ID=$(rcast chain-id --rpc-url "$R")
 }
 
-# The graduation / order-minimum rows of both testnets (Deploy.s.sol GRAD_<chainId>):
+# The graduation / order-minimum rows of the three testnets (Deploy.s.sol GRAD_<chainId>):
 # quote:graduationVolume:minNotional:seatObligation, small testnet values (USDC min order 0.0001, native 0.001).
 # Graduation needs this volume in each of four consecutive expiries: 0.001 USDC and 0.1 native, so the small seeds of
-# scripts/roll-testnet.sh (SEED_UNIT_BPS=100) graduate a market and let the vaults invest; scripts/test/grad-seed.test.sh
-# checks one seed clears them. The whole table is part of the core's init code (both chains carry every row, so they
-# share one core address): changing any value here and redeploying gives a NEW core address on both chains; redeploy
-# both and regenerate the SDK and CRE configs (scripts/deploy-testnet.sh does).
+# scripts/roll-testnet.sh graduate the native/USDC market and let the vaults invest; scripts/test/grad-seed.test.sh
+# checks one seed clears them. The whole table is part of the core's init code (every chain carries every row, so they
+# share one core address): changing any value here and redeploying gives a NEW core address on every chain. Adding
+# GRAD_11155111 (2026-10-23) did exactly that: the live Monad / HyperEVM core 0x7E02…b1f7 was deployed without it, so
+# Sepolia gets another address until both are redeployed on TESTNET_SALT_NEXT (founder's call; see TESTNET_SALT).
+# A redeploy regenerates the SDK and CRE configs (scripts/deploy-testnet.sh does).
+# Sepolia's native row is not cheap like WMON / WHYPE: 0.1 WETH (~240 USD) is both the per-expiry graduation volume
+# of the WETH-quoted wstETH/WETH market and the seat obligation of a seat on it, all from faucet ETH, so that market
+# (and the pegged vault) will in practice not graduate. It is in the init code of the 0xc0f3 core already deployed on
+# Sepolia (2026-10-23); pick a smaller value (e.g. 0.01 WETH) before the next joint redeploy (IMPLEMENTATION_NOTES §7).
 testnet_grad() {
   export GRAD_10143="$M_WMON:100000000000000000:1000000000000000:100000000000000000,$M_USDC:1000:100:100000"
   export GRAD_998="$H_WHYPE:100000000000000000:1000000000000000:100000000000000000,$H_USDC:1000:100:100000"
+  export GRAD_11155111="$S_WETH:100000000000000000:1000000000000000:100000000000000000,$S_USDC:1000:100:100000"
 }
 
 # File mtime in seconds: GNU stat (Linux) first, BSD stat (macOS) second.
@@ -138,8 +201,8 @@ verify_stage() {
   for a in $(python3 - "$f" <<'PY'
 import json, sys
 d = json.load(open(sys.argv[1]))
-keys = ["confluere", "router", "wrapperFactory", "vaultFactory", "keeperReceiver", "seatRegistry"]
-out = [d[k] for k in keys if k in d] + [v for v in (d.get("vaults") or {}).values()]
+keys = ["confluere", "router", "wrapperFactory", "vaultFactory", "keeperReceiver", "seatRegistry", "positionMarket"]
+out = [d[k] for k in keys if k in d] + [v for m in ("vaults", "seatLPTokens") for v in (d.get(m) or {}).values()]
 print(" ".join(a for a in out if int(a, 16) != 0))
 PY
   ); do
@@ -158,7 +221,7 @@ PY
 }
 
 # keep_records STAGE: a Deploy re-run rewrites the whole deployments file (Deploy.s.sol _write) and so leaves out the
-# .pools, .vaults and .positionMarket that later steps recorded. When the staged file names the same core as deployments/<chain>.json,
+# .pools, .vaults, .positionMarket and .seatLPTokens that later steps recorded. When the staged file names the same core as deployments/<chain>.json,
 # those records still describe live contracts of that core: copy them back into the stage (they are verified with it).
 # A stage that names another core starts empty, as it should.
 keep_records() {
@@ -167,7 +230,7 @@ keep_records() {
 import json, sys
 old, new = (json.load(open(f)) for f in sys.argv[1:3])
 if str(old.get("confluere", "")).lower() == str(new.get("confluere", "")).lower() != "":
-    kept = [k for k in ("pools", "vaults", "positionMarket") if k in old and k not in new]
+    kept = [k for k in ("pools", "vaults", "positionMarket", "seatLPTokens") if k in old and k not in new]
     for k in kept:
         new[k] = old[k]
     if kept:
@@ -295,8 +358,10 @@ trap 'exit 130' INT TERM
 # LST_SEED_UNIT_BPS, the extra pair EXTRA_SEED_UNIT_BPS.
 # Each buy escrows exactly what the core's placeOrder pulls (OrderLogic, BUY):
 # quoteUp(units * limit) + ttl, i.e. the quote rounded up per order plus 1 wei per batch of its ttl (SEED_TTL below).
-# FUND=1 wraps the missing wrapped-native amount from the native balance (deposit()); USDC and shMON must be
-# obtained by hand (Circle faucet; FastLane deposit). GAS_RESERVE (wei, default 0.5 native) stays unwrapped for gas.
+# FUND=1 wraps the missing wrapped-native amount from the native balance (deposit()) and, where the LST mints for
+# native coin sent to it (LST_FUND=receive: wstETH on Sepolia), stakes the missing LST the same way; USDC and shMON must
+# be obtained by hand (Circle faucet; FastLane deposit). GAS_RESERVE (wei, default 0.5 native; testnet_params may set a
+# chain's own) stays unwrapped for gas.
 # Public testnet RPCs drop connections now and then (HyperEVM: "tls handshake eof"): retry a read a few times before
 # giving up, so a flaky read does not stop a deployment between steps.
 rcast() {
@@ -372,25 +437,43 @@ print("gas", int(reserve), int(gas), max(0, int(reserve) - int(gas)), "-")
 PY
   )
   echo "$plan" | awk '{printf "  %-11s need %s have %s short %s\n", $1, $2, $3, $4}'
-  local short_nat gas_have reserve
+  local short_nat avail reserve eth
   short_nat=$(echo "$plan" | awk '$1=="native"{print $4}')
-  gas_have=$(echo "$plan" | awk '$1=="gas"{print $3}')
+  avail=$(echo "$plan" | awk '$1=="gas"{print $3}') # native coin left after what FUND=1 already spent
   reserve=$(echo "$plan" | awk '$1=="gas"{print $2}')
+  # spend AMOUNT: true when the native coin left after AMOUNT still covers GAS_RESERVE (wei, beyond 64-bit shell math)
+  spend() { python3 -c "import sys; a, x, r = map(int, sys.argv[1:]); sys.exit(0 if a - x >= r else 1)" "$avail" "$1" "$reserve"; }
   local fail=0 lbl need have short addr
   while read -r lbl need have short addr; do
     [ "$short" != 0 ] || continue
     case $lbl in
       native)
-        if [ "${FUND:-0}" = 1 ] && python3 -c "import sys; sys.exit(0 if $gas_have - $short_nat >= $reserve else 1)"; then
+        if [ "${FUND:-0}" = 1 ] && spend "$short_nat"; then
           echo "  FUND=1: wrapping $short_nat wei into $NATIVE"
           cast send "$NATIVE" "deposit()" --value "$short_nat" --rpc-url "$R" "${SIGNER[@]}" >/dev/null </dev/null
+          avail=$(python3 -c "import sys; print(int(sys.argv[1]) - int(sys.argv[2]))" "$avail" "$short_nat")
         else
           echo "  short of wrapped native $NATIVE by $short_nat: cast send $NATIVE 'deposit()' --value $short_nat ..."
           echo "  (or re-run with FUND=1; it keeps GAS_RESERVE=$reserve wei of native for gas)"
           fail=1
         fi ;;
       usdc) echo "  short of USDC $USDC by $short (6 decimals): https://faucet.circle.com"; fail=1 ;;
-      lst) echo "  short of LST $LST by $short: FastLane deposit(assets, receiver), ~12.9 MON per shMON"; fail=1 ;;
+      lst)
+        # the native coin that mints `short` LST: the token's own rate, plus 1 gwei for the share rounding of staking
+        eth=""
+        if [ "${FUND:-0}" = 1 ] && [ "${LST_FUND:-}" = receive ]; then
+          eth=$(rcast call "$LST" "getStETHByWstETH(uint256)(uint256)" "$short" --rpc-url "$R" | awk '{print $1}')
+          eth=$(python3 -c "import sys; print(int(sys.argv[1]) + 10**9)" "$eth")
+        fi
+        if [ -n "$eth" ] && spend "$eth"; then
+          echo "  FUND=1: staking $eth wei into $LST for $short LST"
+          cast send "$LST" --value "$eth" --rpc-url "$R" "${SIGNER[@]}" >/dev/null </dev/null
+          avail=$(python3 -c "import sys; print(int(sys.argv[1]) - int(sys.argv[2]))" "$avail" "$eth")
+        else
+          echo "  short of LST $LST by $short: ${LST_HINT:-obtain it by hand}"
+          [ -z "$eth" ] || echo "  (FUND=1 would stake $eth wei but keeps GAS_RESERVE=$reserve wei of native for gas)"
+          fail=1
+        fi ;;
       gas) echo "  native balance below GAS_RESERVE for gas"; fail=1 ;;
       *) echo "  short of $lbl $addr by $short"; fail=1 ;;
     esac
@@ -446,13 +529,19 @@ trade_rounds() {
   run "tick: settle due pools" script/Seed.s.sol 0 --sig "tick()"
 }
 
-# Regenerate what reads deployments/*.json: SDK addresses and, on Monad, the CRE workflow config (receiver, vaults,
-# live pools; the workflow targets monad-testnet only).
+# Regenerate what reads deployments/*.json: SDK addresses and the CRE workflow config (receiver, vaults, live pools).
+# One CRE config per chain (services/keeper-cre/scripts/sync-config.mjs CRE_CHAINS): Monad testnet writes
+# config.staging.json, Sepolia config.sepolia.json (created on its first sync). Sepolia's scan from deployBlock does not
+# use $R: publicnode prunes logs older than ~10,000 blocks, so sync-config takes its own archive RPC (1,000-block
+# chunks) unless SEPOLIA_LOGS_RPC names another. HyperEVM testnet has no CRE workflow.
 sync_offchain() {
   (cd "$ROOT/packages/sdk" && node scripts/sync-deployments.mjs && pnpm -s build)
   if [ "$CHAIN" = monad ]; then
     (cd "$ROOT" && DEPLOYMENT=monad-testnet RPC_URL="$R" pnpm --filter @confluere/keeper-cre -s sync-config)
+  elif [ "$CHAIN" = sepolia ]; then
+    (cd "$ROOT" && env DEPLOYMENT=sepolia CRE_CONFIG=config.sepolia.json ${SEPOLIA_LOGS_RPC:+RPC_URL="$SEPOLIA_LOGS_RPC"} \
+      pnpm --filter @confluere/keeper-cre -s sync-config)
   else
-    echo "CRE config not touched: the workflow targets monad-testnet only"
+    echo "CRE config not touched: no CRE workflow for $NAME"
   fi
 }

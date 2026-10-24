@@ -16,7 +16,9 @@ const configSchema = z.object({
   // "5 */2 * * * *" (second 5 of every 2nd minute) for the 120 s demo grid; a 30-minute mainnet grid would use
   // "5 */30 * * * *".
   schedule: z.string(),
-  chainSelectorName: z.string(), // "monad-testnet" | "hyperliquid-testnet"
+  // CRE chain-selector name: "monad-testnet" (config.staging.json) or "ethereum-testnet-sepolia" (config.sepolia.json);
+  // scripts/sync-config.mjs CRE_CHAINS lists the targets and their forwarders.
+  chainSelectorName: z.string(),
   isTestnet: z.boolean(),
   receiver: z.string(), // KeeperReceiver address from deployments/<chain>.json
   pools: z.array(z.string()),

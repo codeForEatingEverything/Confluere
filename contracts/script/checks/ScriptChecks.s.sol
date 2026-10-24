@@ -17,6 +17,8 @@ import {Vault} from "../../src/periphery/Vault.sol";
 ///   forge script script/checks/ScriptChecks.s.sol
 /// - Deploy refuses a demo grid or mocks on production chains, a mainnet without GUARDIAN_MEMBERS, and a public chain
 ///   without its GRAD_<chainId> row; DEMO defaults to false.
+/// - Sepolia (the chain table's last row): no mocks, its GRAD_11155111 row is required, and the core picks the
+///   600-block window (25 on the demo grid) with that row's graduation and order-minimum values.
 /// - Deploy, CreatePools, CreateVaults and Seed can be re-run after a partial failure without reverting or doubling
 ///   the book; Seed.collect() claims closed pools and withdraws pending balances.
 /// - A Deploy re-run keeps the core's deploy block (also from DEPLOYMENTS_FALLBACK), and refuses to guess one
@@ -48,6 +50,7 @@ contract ScriptChecks is Script {
         _demoDefaultsOff();
         _guards();
         _dailyGrid();
+        _sepolia();
         _idempotentLifecycle();
 
         vm.removeFile(file);
@@ -63,7 +66,11 @@ contract ScriptChecks is Script {
     function _guards() internal {
         vm.chainId(143);
         _expectRevert(new Deploy(), "mainnet: GUARDIAN_MEMBERS required");
+        vm.chainId(1);
+        _expectRevert(new Deploy(), "mainnet: GUARDIAN_MEMBERS required");
         vm.setEnv("DEMO", "true");
+        _expectRevert(new Deploy(), "demo: testnets and anvil only");
+        vm.chainId(143);
         _expectRevert(new Deploy(), "demo: testnets and anvil only");
         vm.chainId(999);
         _expectRevert(new Deploy(), "demo: testnets and anvil only");
@@ -83,6 +90,8 @@ contract ScriptChecks is Script {
         vm.setEnv("DEMO", "false");
         vm.setEnv("GRID", "daily");
         vm.chainId(999);
+        _expectRevert(new Deploy(), "daily grid: testnets and anvil only");
+        vm.chainId(1);
         _expectRevert(new Deploy(), "daily grid: testnets and anvil only");
         vm.setEnv("DEMO", "true");
         vm.chainId(10_143);
@@ -159,6 +168,43 @@ contract ScriptChecks is Script {
         vm.setEnv("SEED_UNIT_BPS", "10000");
         vm.setEnv("SEED_TTL", "48");
         vm.setEnv("SEED_ROUTER", vm.toString(address(0)));
+        vm.removeFile(file);
+    }
+
+    /// @dev Runs after _dailyGrid (MOCKS=true, GRID and DEMO off). Own salts: the registry does not depend on the grid,
+    /// so each grid needs its own (as on the real testnets).
+    function _sepolia() internal {
+        vm.chainId(11_155_111);
+        _expectRevert(new Deploy(), "mocks: anvil only");
+        vm.setEnv("MOCKS", "false");
+        vm.setEnv("GRID", "daily");
+        vm.setEnv("GRAD_11155111", "");
+        _expectRevert(new Deploy(), "set GRAD_11155111");
+        address weth = address(0xE7);
+        address usdc = address(0x05DC);
+        vm.setEnv(
+            "GRAD_11155111",
+            string.concat(
+                vm.toString(weth),
+                ":100000000000000000:1000000000000000:100000000000000000,",
+                vm.toString(usdc),
+                ":1000:100:100000"
+            )
+        );
+        vm.setEnv("SALT", vm.toString(bytes32(uint256(0xc0f3))));
+        Confluere core = new Deploy().run();
+        require(core.WINDOW_BLOCKS() == 600 && core.grid().period == 1 days, "sepolia: window / grid");
+        require(core.graduationVolume(weth) == 1e17 && core.minNotional(usdc) == 100, "sepolia: GRAD row");
+        require(vm.parseJsonUint(vm.readFile(file), ".chainId") == 11_155_111, "sepolia: chain id not recorded");
+        vm.setEnv("GRID", "");
+        vm.setEnv("DEMO", "true");
+        vm.setEnv("SALT", vm.toString(bytes32(uint256(0xc0f4))));
+        core = new Deploy().run();
+        require(core.WINDOW_BLOCKS() == 25 && core.grid().period == 1 hours, "sepolia demo: window / grid");
+
+        vm.setEnv("DEMO", "false");
+        vm.setEnv("GRAD_11155111", "");
+        vm.setEnv("SALT", vm.toString(bytes32(uint256(0xc0f1))));
         vm.removeFile(file);
     }
 

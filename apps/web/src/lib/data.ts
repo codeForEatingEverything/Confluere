@@ -700,8 +700,12 @@ export function useGrid() {
 }
 
 const erc4626Abi = parseAbi(["function convertToShares(uint256 assets) view returns (uint256)"]);
+const wstEthAbi = parseAbi(["function getWstETHByStETH(uint256 stETHAmount) view returns (uint256)"]);
 
-/** ERC-4626 `convertToShares(assets)` of a token (the loop's LST staking rate); null when the token is not a vault. */
+/**
+ * ERC-4626 `convertToShares(assets)` of a token (the loop's LST staking rate); for Lido's wstETH (Sepolia), which is no
+ * vault, `getWstETHByStETH(assets)` (stETH ≈ ETH 1:1). Null when the token is neither.
+ */
 export function useConvertToShares(token: Address | undefined, assets: bigint | undefined) {
   const { chainId, client } = useChainCtx();
   return useQuery({
@@ -712,7 +716,11 @@ export function useConvertToShares(token: Address | undefined, assets: bigint | 
       try {
         return (await client!.readContract({ address: token!, abi: erc4626Abi, functionName: "convertToShares", args: [assets!] })) as bigint;
       } catch {
-        return null;
+        try {
+          return (await client!.readContract({ address: token!, abi: wstEthAbi, functionName: "getWstETHByStETH", args: [assets!] })) as bigint;
+        } catch {
+          return null;
+        }
       }
     },
   });

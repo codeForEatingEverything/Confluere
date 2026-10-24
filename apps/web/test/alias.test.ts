@@ -8,7 +8,9 @@ import { afterEach, describe, expect, it } from "vitest";
 import { deployments } from "@confluere/sdk";
 import { onchainSymbol } from "../src/lib/data";
 import { launchTokensOf } from "../src/lib/chains";
-import { tokenLogo } from "../src/lib/logos";
+import { chainLogo, tokenLogo } from "../src/lib/logos";
+import { existsSync } from "node:fs";
+import { join } from "node:path";
 import { lpSymbol } from "../src/lib/lp";
 import { selectorTokens } from "../src/lib/product";
 import { NATIVE } from "../src/lib/native";
@@ -41,6 +43,13 @@ describe("the wrapped coin is its own token", () => {
     expect(tokenLogo(998, WHYPE)).toBe(tokenLogo(998, ZERO));
     expect(tokenLogo(10143, WMON)).toBe(tokenLogo(10143, ZERO));
     expect(tokenLogo(10143, SHMON)).not.toBe(tokenLogo(10143, ZERO));
+    // Sepolia: WETH carries the ETH logo (plus the W mark in TokenIcon), wstETH and USDC their own; every file exists
+    expect(tokenLogo(11155111, "0xfFf9976782d46CC05630D1f6eBAb18b2324d6B14")).toBe(tokenLogo(11155111, ZERO));
+    expect(tokenLogo(11155111, "0xB82381A3fBD3FaFA77B3a7bE693342618240067b")).not.toBe(tokenLogo(11155111, ZERO));
+    for (const a of [ZERO, "0xB82381A3fBD3FaFA77B3a7bE693342618240067b", "0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238"]) {
+      expect(existsSync(join(__dirname, "..", "public", tokenLogo(11155111, a)!))).toBe(true);
+    }
+    expect(existsSync(join(__dirname, "..", "public", chainLogo(11155111)!))).toBe(true);
     expect(tokenLogo(998, USDC_998)).not.toBe(tokenLogo(998, ZERO));
     expect(tokenLogo(998, undefined, "kHYPE")).toBeTruthy();
   });

@@ -4,7 +4,16 @@ staging-settings:
     - chain-name: monad-testnet
       url: https://testnet-rpc.monad.xyz
 
+# Ethereum Sepolia (config.sepolia.json, written by `DEPLOYMENT=sepolia pnpm sync-config` once deployments/sepolia.json
+# exists).
+sepolia-settings:
+  rpcs:
+    - chain-name: ethereum-testnet-sepolia
+      url: https://ethereum-sepolia-rpc.publicnode.com
+
 production-settings:
   rpcs:
     - chain-name: monad-testnet
       url: https://testnet-rpc.monad.xyz
+    - chain-name: ethereum-testnet-sepolia
+      url: https://ethereum-sepolia-rpc.publicnode.com

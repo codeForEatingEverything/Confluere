@@ -1,12 +1,19 @@
 /** Small helpers shared by the index route handlers. */
 import { servesChain } from "./chainIndex";
+import { deploymentOf, isEnabledChain } from "../chains";
 
 export const NO_STORE = { "cache-control": "no-store" };
 
-/** `?chain=` as a served chain id, or a 400 response. */
+/**
+ * `?chain=` as a served chain id, or an error response: 404 `{ error, notDeployed: true }` for a network the app serves
+ * that has no deployment yet (Sepolia before its deploy; the client never asks then), 400 for anything else.
+ */
 export function chainParam(req: Request): number | Response {
   const raw = new URL(req.url).searchParams.get("chain");
   const id = Number(raw);
+  if (raw && Number.isInteger(id) && isEnabledChain(id) && !deploymentOf(id)) {
+    return Response.json({ error: `not deployed on chain ${id} yet`, notDeployed: true }, { status: 404, headers: NO_STORE });
+  }
   if (!raw || !Number.isInteger(id) || !servesChain(id)) {
     return Response.json({ error: `unsupported chain ${raw ?? "(missing)"}` }, { status: 400, headers: NO_STORE });
   }

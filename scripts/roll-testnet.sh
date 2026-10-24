@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Opens the next expiry on a testnet deployed by scripts/deploy-testnet.sh.
-# Usage: scripts/roll-testnet.sh monad|hyperevm [collect|fund|pools|seed|sync]
+# Usage: scripts/roll-testnet.sh monad|hyperevm|sepolia [collect|fund|pools|seed|trade|sync]
 # A market graduates after four consecutive expiries that each reached the graduation volume, so each run opens the
 # expiry exactly one period after the one the last run opened (EXPIRY for CreatePools), not merely the nearest one:
 # four runs give four consecutive expiries however early they start. Up to four expiries may be listed ahead, so the
@@ -17,8 +17,9 @@
 #   4. seed: a two-sided book in every new pool at the chain's seed units (scripts/lib/testnet.sh: SEED_UNIT_BPS,
 #      LST_SEED_UNIT_BPS, EXTRA_SEED_UNIT_BPS; pools already seeded are skipped), then trade: TRADE_ROUNDS rounds of
 #      small crossing trades, one batch apart,
-#   5. sync: regenerates the SDK addresses and, on Monad, the CRE workflow config (pnpm sync-config: receiver, vaults
-#      and every pool that is not Closed, so maturing and closing the earlier expiries stays in the CRE tick).
+#   5. sync: regenerates the SDK addresses and, on Monad and Sepolia, the chain's CRE workflow config (pnpm sync-config:
+#      receiver, vaults and every pool that is not Closed, so maturing and closing the earlier expiries stays in the
+#      CRE tick; see sync_offchain in scripts/lib/testnet.sh).
 # The optional step starts from there (after a failure). RESUME=1 resumes only that first step's interrupted broadcast;
 # a failed step prints the exact command. The keeper (or CRE) settles, matures and closes the pools; graduation is
 # permissionless and the keeper calls it. Reads PRIVATE_KEY from contracts/.env. Pool ids of earlier runs and the
@@ -28,7 +29,7 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT/contracts"
 set -a; . ./.env; set +a
 . "$ROOT/scripts/lib/testnet.sh"
-testnet_env "${1:-}" || { echo "usage: $0 monad|hyperevm [collect|fund|pools|seed|sync]"; exit 1; }
+testnet_env "${1:-}" || { echo "usage: $0 monad|hyperevm|sepolia [collect|fund|pools|seed|trade|sync]"; exit 1; }
 [ -f "$J" ] && [ -n "$(jget "$J" pools.native)" ] || { echo "no pools in deployments/$NAME.json: run scripts/deploy-testnet.sh $CHAIN first"; exit 1; }
 FROM=${2:-collect}
 steps=(collect fund pools seed trade sync)
@@ -40,7 +41,8 @@ for st in "${steps[@]}"; do [ "$st" = "$FROM" ] && started=1; done
 LST=$(jget "$J" pools.lst); NATIVE=$(jget "$J" pools.native); USDC=$(jget "$J" pools.usdc)
 export LST NATIVE USDC
 # The extra pair (CreatePools EXTRA_*) this deployment already opens (.pools.extraAsset), else the chain's default from
-# scripts/lib/testnet.sh (HyperEVM: USDC/WHYPE; Monad: none), so a roll can add the pair to a running deployment.
+# scripts/lib/testnet.sh (HyperEVM: USDC/WHYPE; Monad: shMON/USDC; Sepolia: wstETH/USDC), so a roll can add the pair
+# to a running deployment.
 XA=$(jget "$J" pools.extraAsset)
 if [ -n "$XA" ]; then EXTRA_ASSET=$XA; EXTRA_QUOTE=$(jget "$J" pools.extraQuote); export EXTRA_ASSET EXTRA_QUOTE; fi
 CORE=$(jget "$J" confluere)

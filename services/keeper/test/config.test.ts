@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import type { Deployment } from "@confluere/sdk";
 import { loadConfig } from "../src/config.js";
 
 // anvil key 0: test-only
@@ -20,6 +21,17 @@ describe("loadConfig", () => {
     expect(loadConfig({ PRIVATE_KEY, CHAIN_ID: "998" }).pollMs).toBe(15_000);
     expect(loadConfig({ PRIVATE_KEY, CHAIN_ID: "10143" }).pollMs).toBe(3_000);
     expect(loadConfig({ PRIVATE_KEY, CHAIN_ID: "998", POLL_MS: "5000" }).pollMs).toBe(5_000);
+  });
+  it("keeps Sepolia: 1,000-block getLogs, 6 s polls, a clear error until it is deployed", () => {
+    const sepolia = { 11155111: { chainId: 11155111, deployBlock: 1 } as Deployment };
+    const cfg = loadConfig({ PRIVATE_KEY, CHAIN_ID: "11155111" }, sepolia);
+    expect(cfg.chain.id).toBe(11155111);
+    expect(cfg.logChunk).toBe(1000n);
+    expect(cfg.pollMs).toBe(6_000);
+    expect(cfg.rpcUrl).toMatch(/^https:/);
+    expect(loadConfig({ PRIVATE_KEY, CHAIN_ID: "11155111", LOG_CHUNK: "5000" }, sepolia).logChunk).toBe(1000n);
+    expect(() => loadConfig({ PRIVATE_KEY, CHAIN_ID: "11155111" }, {})).toThrow(/no deployment for chain 11155111/);
+    expect(() => loadConfig({ PRIVATE_KEY, CHAIN_ID: "11155420" })).toThrow(/unsupported chain/);
   });
   it("reads PRIVATE_KEY from the env it is given", () => {
     expect(() => loadConfig({ CHAIN_ID: "10143" })).toThrow(/PRIVATE_KEY/);
