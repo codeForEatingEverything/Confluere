@@ -125,7 +125,7 @@ contract WindowTest is Base {
         assertEq(_pend(address(weth), eve), ONE);
         assertEq(_pend(address(usdc), eve), 5e17 * (uint256(K) + 100e6) / ONE, "unused half refunded");
         assertEq(_pend(address(usdc), carol) - carol0, uint256(K) + 40e6, "losing bid refunded");
-        (address o,,,,,,) = core.order(pid, b1);
+        (address o,,,,,,,) = core.order(pid, b1);
         assertEq(o, address(0));
 
         IConfluere.PoolView memory v = core.pool(pid);

@@ -133,8 +133,8 @@ contract PeripheryTest is Base {
         ps[1] = _params(BUY, ONE, 2000e6, 0, 3, core.findHint(pid, BUY, 2000e6));
         uint64[] memory ids = r.placeOrders(pids, ps);
         vm.stopPrank();
-        (address o0,,,,,,) = core.order(pid, ids[0]);
-        (address o1,,,, uint128 esc,,) = core.order(pid, ids[1]);
+        (address o0,,,,,,,) = core.order(pid, ids[0]);
+        (address o1,,,,, uint128 esc,,) = core.order(pid, ids[1]);
         assertEq(o0, dave);
         assertEq(o1, dave);
         assertEq(esc, 2000e6 + 300_000 + 6);

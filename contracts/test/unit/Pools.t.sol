@@ -106,7 +106,7 @@ contract PoolsTest is Base {
         p.owner = dave;
         vm.prank(alice);
         uint64 id = core.placeOrder(pid, p);
-        (address owner,,,,,,) = core.order(pid, id);
+        (address owner,,,,,,,) = core.order(pid, id);
         assertEq(owner, dave);
         vm.prank(dave);
         core.cancelOrder(pid, id);
@@ -127,7 +127,7 @@ contract PoolsTest is Base {
         uint64 d = core.placeOrder(pid, _params(SELL, ONE, 2950e6, 0, 1, staleHint));
         (uint64 head,) = core.bookHead(pid, SELL);
         assertEq(head, a);
-        (,,,,,, uint64 nextOfD) = core.order(pid, d);
+        (,,,,,,, uint64 nextOfD) = core.order(pid, d);
         assertEq(nextOfD, b);
     }
 
@@ -175,7 +175,7 @@ contract PoolsTest is Base {
         _sell(dave, pid, ONE, 2050e6);
         (, uint32 count) = core.bookHead(pid, SELL);
         assertEq(count, 8);
-        (address owner,,,,,,) = core.order(pid, worst);
+        (address owner,,,,,,,) = core.order(pid, worst);
         assertEq(owner, address(0));
         assertEq(_pend(address(weth), alice), ONE);
     }
@@ -239,7 +239,7 @@ contract PoolsTest is Base {
         (uint64 cur,) = core.bookHead(pid, side);
         for (uint256 i; i < ids.length; ++i) {
             assertEq(cur, ids[i], "book order");
-            (,,,,,, cur) = core.order(pid, cur);
+            (,,,,,,, cur) = core.order(pid, cur);
         }
     }
 }

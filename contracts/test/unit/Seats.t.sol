@@ -219,7 +219,7 @@ contract SeatsTest is Base {
         // the order belongs to the holder in the core
         _post(alice, ONE, 2800e6);
         (uint64 head,) = core.bookHead(pid, BUY);
-        (address owner,,,,,,) = core.order(pid, head);
+        (address owner,,,,,,,) = core.order(pid, head);
         assertEq(owner, alice);
     }
 

@@ -55,13 +55,13 @@ contract ClearingTest is Base {
         assertEq(core.balanceOf(dave, _r(pid)), 5e17);
         assertEq(core.balanceOf(bob, _c(pid)), 15e17);
         assertEq(core.balanceOf(carol, _c(pid)), 0);
-        (address ao,,,,,,) = core.order(pid, a);
+        (address ao,,,,,,,) = core.order(pid, a);
         assertEq(ao, address(0), "filled order removed");
-        (,, uint96 bUnits,,,,) = core.order(pid, b);
+        (,,, uint96 bUnits,,,,) = core.order(pid, b);
         assertEq(bUnits, 15e17, "marginal partially filled");
-        (address xo,,,,,,) = core.order(pid, x);
+        (address xo,,,,,,,) = core.order(pid, x);
         assertEq(xo, address(0));
-        (address yo,,,,,,) = core.order(pid, y);
+        (address yo,,,,,,,) = core.order(pid, y);
         assertEq(yo, carol, "unfilled stays");
         // every filled seller got at least its limit, every filled buyer paid at most its limit
         assertEq(_pend(address(usdc), alice), 2950e6 - 442_500 - 3_048_315, "P* net of trade fee and spread share");
@@ -94,7 +94,7 @@ contract ClearingTest is Base {
         _buy(bob, pid, ONE, 3100e6);
         _settle(pid);
         assertEq(core.balanceOf(alice, _r(pid)), 0, "expired order did not trade");
-        (address o,,,,,,) = core.order(pid, s);
+        (address o,,,,,,,) = core.order(pid, s);
         assertEq(o, address(0));
         assertEq(_pend(address(weth), alice), ONE);
     }
@@ -107,8 +107,8 @@ contract ClearingTest is Base {
         (ids[0], ids[1]) = (s, keep);
         vm.prank(eve);
         core.purge(pid, ids);
-        (address o1,,,,,,) = core.order(pid, s);
-        (address o2,,,,,,) = core.order(pid, keep);
+        (address o1,,,,,,,) = core.order(pid, s);
+        (address o2,,,,,,,) = core.order(pid, keep);
         assertEq(o1, address(0));
         assertEq(o2, dave, "live order not purgeable");
     }
@@ -117,7 +117,7 @@ contract ClearingTest is Base {
         _sell(alice, pid, ONE, 2900e6);
         uint64 x = _buy(bob, pid, 2 * ONE, 2900e6);
         _settle(pid);
-        (,, uint96 units,, uint128 esc, uint32 deadline,) = core.order(pid, x);
+        (,,, uint96 units,, uint128 esc, uint32 deadline,) = core.order(pid, x);
         assertEq(units, ONE);
         uint256 left = deadline - core.pool(pid).settleCount;
         assertEq(esc, 2900e6 + 435_000 + 2 * left, "remaining escrow = remainder at limit + fee + reserve");
