@@ -169,7 +169,7 @@ library OrderLogic {
         o.units = a.units;
         o.limit = a.minPrice;
         o.escrow = a.maxTopUp;
-        s.rolloverOld[a.newPoolId][id] = a.oldPoolId;
+        s.linkedPool[a.newPoolId][id] = a.oldPoolId;
         CoreLib.pullExact(np.key.quote, a.maxTopUp);
         s.insert(pr, a.newPoolId, np, id, a.hint);
         emit IConfluere.OrderPlaced(a.newPoolId, id, msg.sender, SELL, a.units, a.minPrice, a.maxTopUp, o.deadline);
@@ -215,7 +215,7 @@ library OrderLogic {
             if (o.owner == address(0) || o.side == BID) continue;
             bool dead = tradingOver || o.deadline <= ps.settleCount;
             if (!dead && o.flags & FLAG_ROLLOVER != 0) {
-                PoolState storage op = s.pools[s.rolloverOld[poolId][ids[i]]];
+                PoolState storage op = s.pools[s.linkedPool[poolId][ids[i]]];
                 dead = !s.windowOpen(op) && (op.status != Status.Open || block.timestamp >= op.key.expiry);
             }
             if (dead) s.removeWithRefund(poolId, ps, ids[i], CoreLib.RM_EXPIRED);

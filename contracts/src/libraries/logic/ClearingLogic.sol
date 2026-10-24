@@ -38,6 +38,7 @@ library ClearingLogic {
         uint256 strike;
         uint256 spread;
         uint256 trade;
+        uint256 nextBoundary; // the batch boundary after this one: a rollover's last chance before its old pool expires
     }
 
     struct Cursor {
@@ -58,7 +59,8 @@ library ClearingLogic {
     function settleBatch(CoreState storage s, Params memory pr, bytes32 poolId) external {
         PoolState storage ps = s.pool(poolId);
         ps.requireTrading();
-        uint64 batchIndex = uint64((block.timestamp - pr.anchor) / ps.interval(pr.batchInterval));
+        uint256 iv = ps.interval(pr.batchInterval);
+        uint64 batchIndex = uint64((block.timestamp - pr.anchor) / iv);
         if (batchIndex <= ps.lastSettledBatch) revert IConfluere.BatchNotReady();
         ps.lastSettledBatch = batchIndex;
 
@@ -69,6 +71,7 @@ library ClearingLogic {
         bt.treasury = pr.treasury;
         bt.quote = ps.key.quote;
         bt.strike = ps.key.strike;
+        bt.nextBoundary = pr.anchor + (uint256(batchIndex) + 1) * iv;
         ps.settleCount = bt.sc + 1;
 
         for (uint8 side; side <= NC_BUY; ++side) {
@@ -177,13 +180,13 @@ library ClearingLogic {
         returns (uint256 q, Cursor memory cs, Cursor memory cb, uint256 price)
     {
         mapping(uint64 => Order) storage os = s.orders[bt.poolId];
-        cs = _firstLive(s, bt.poolId, s.books[bt.poolId][SELL].head, bt.sc);
-        cb = _firstLive(s, bt.poolId, s.books[bt.poolId][BUY].head, bt.sc);
+        cs = _firstLive(s, bt, s.books[bt.poolId][SELL].head);
+        cb = _firstLive(s, bt, s.books[bt.poolId][BUY].head);
         while (pre != 0 && cs.id != 0) {
             uint256 t = cs.rem < pre ? cs.rem : pre;
             pre -= t;
             cs.rem -= t;
-            if (cs.rem == 0) cs = _firstLive(s, bt.poolId, os[cs.id].next, bt.sc);
+            if (cs.rem == 0) cs = _firstLive(s, bt, os[cs.id].next);
         }
         if (pre != 0) return (0, cs, cb, 0);
         uint256 lastB;
@@ -197,8 +200,8 @@ library ClearingLogic {
             lastB = bl;
             cs.rem -= m;
             cb.rem -= m;
-            if (cs.rem == 0) cs = _firstLive(s, bt.poolId, os[cs.id].next, bt.sc);
-            if (cb.rem == 0) cb = _firstLive(s, bt.poolId, os[cb.id].next, bt.sc);
+            if (cs.rem == 0) cs = _firstLive(s, bt, os[cs.id].next);
+            if (cb.rem == 0) cb = _firstLive(s, bt, os[cb.id].next);
         }
         if (q != 0) price = Clearing.midpoint(price, lastB);
     }
@@ -257,7 +260,7 @@ library ClearingLogic {
         while (target != 0 && id != 0) {
             Order storage o = os[id];
             uint64 nxt = o.next;
-            if (!s.live(bt.poolId, id, o, bt.sc)) {
+            if (!s.live(bt.poolId, id, o, bt.sc, bt.nextBoundary)) {
                 if (o.deadline <= bt.sc) s.removeWithRefund(bt.poolId, ps, id, CoreLib.RM_EXPIRED);
             } else {
                 uint256 f = o.units < target ? o.units : target;
@@ -341,7 +344,7 @@ library ClearingLogic {
         uint256 f,
         uint256 proceeds
     ) private {
-        bytes32 oldId = s.rolloverOld[bt.poolId][id];
+        bytes32 oldId = s.linkedPool[bt.poolId][id];
         PoolState storage op = s.pools[oldId];
         address owner = o.owner;
         uint256 pay = Settlement.repayAmount(f, op.key.strike, op.scale());
@@ -414,13 +417,9 @@ library ClearingLogic {
         }
     }
 
-    function _firstLive(CoreState storage s, bytes32 poolId, uint64 id, uint32 sc)
-        private
-        view
-        returns (Cursor memory c)
-    {
-        mapping(uint64 => Order) storage os = s.orders[poolId];
-        while (id != 0 && !s.live(poolId, id, os[id], sc)) {
+    function _firstLive(CoreState storage s, Batch memory bt, uint64 id) private view returns (Cursor memory c) {
+        mapping(uint64 => Order) storage os = s.orders[bt.poolId];
+        while (id != 0 && !s.live(bt.poolId, id, os[id], bt.sc, bt.nextBoundary)) {
             id = os[id].next;
         }
         c.id = id;
@@ -443,7 +442,7 @@ library ClearingLogic {
             Order storage o = os[id];
             if (side == SELL ? o.limit > bt.price : o.limit < bt.price) break;
             sum += rem;
-            Cursor memory nx = _firstLive(s, poolId, o.next, bt.sc);
+            Cursor memory nx = _firstLive(s, bt, o.next);
             id = nx.id;
             rem = nx.rem;
         }
