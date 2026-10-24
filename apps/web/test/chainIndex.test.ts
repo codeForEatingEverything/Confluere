@@ -7,6 +7,8 @@ import { encodeAbiParameters, encodeEventTopics, type Hex } from "viem";
 import { deployments } from "@confluere/sdk";
 import { EVENTS, _resetIndexes, applyLogs, batchesOf, getIndex, logSources, ordersOf, poolsOf, quoteKeysOf, servesChain, statusOf } from "../src/lib/server/chainIndex";
 import type { RawLog, Rpc } from "../src/lib/server/logScan";
+import { chainParam } from "../src/lib/server/http";
+import { deploymentOf } from "../src/lib/chains";
 
 const dir = mkdtempSync(join(tmpdir(), "cf-index-"));
 process.env.CONFLUERE_INDEX_DIR = dir;
@@ -130,6 +132,12 @@ describe("logSources", () => {
     expect(s.some((x) => x.url.includes("hyperliquid-testnet"))).toBe(true);
   });
 
+  it("Sepolia scans through a full-history RPC (thirdweb, 1,000 blocks) before publicnode, whose logs are pruned", () => {
+    const s = logSources(11155111);
+    expect(s[0]).toMatchObject({ url: "https://11155111.rpc.thirdweb.com", range: 1000 });
+    expect(s.at(-1)).toMatchObject({ url: "https://ethereum-sepolia-rpc.publicnode.com", range: 1000 });
+  });
+
   it("LOGS_RPC_<id> overrides the list", () => {
     process.env.LOGS_RPC_998 = "https://x.example|500|3,https://y.example|50";
     expect(logSources(998)).toEqual([
@@ -139,7 +147,14 @@ describe("logSources", () => {
     delete process.env.LOGS_RPC_998;
   });
 
-  it("does not serve chains that are not enabled", () => {
+  it("does not serve chains that are not enabled, nor Sepolia before its deploy (a calm 404 there)", async () => {
+    expect(servesChain(11155111)).toBe(!!deploymentOf(11155111));
+    if (!deploymentOf(11155111)) {
+      const r = chainParam(new Request("http://x/api/pools?chain=11155111")) as Response;
+      expect(r.status).toBe(404);
+      expect(await r.json()).toMatchObject({ notDeployed: true });
+    }
+    expect((chainParam(new Request("http://x/api/pools?chain=5")) as Response).status).toBe(400);
     expect(servesChain(1)).toBe(false);
     expect(servesChain(31337)).toBe(false); // anvil only with NEXT_PUBLIC_ENABLE_ANVIL=1
   });
