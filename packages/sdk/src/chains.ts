@@ -1,8 +1,21 @@
-import { anvil, hyperEvm, hyperliquidEvmTestnet, monad, monadTestnet } from "viem/chains";
+import { anvil, hyperEvm, hyperliquidEvmTestnet, mainnet, monad, monadTestnet, sepolia } from "viem/chains";
 import type { Chain } from "viem";
 
-/** Chains in the core's constructor table. Same CREATE2 addresses on all of them. */
-export const supportedChains = [monadTestnet, hyperliquidEvmTestnet, monad, hyperEvm, anvil] as const satisfies readonly Chain[];
+/**
+ * Chains in the core's constructor table. Monad and HyperEVM share one CREATE2 address; Ethereum (Sepolia, mainnet)
+ * rows were added later, which changes the core's init code, so a Sepolia core has its own address until Monad and
+ * HyperEVM are redeployed with the same table (docs/IMPLEMENTATION_NOTES.md). A chain listed here may have no
+ * deployment yet: `deployments[id]` is then undefined (Sepolia until deployments/sepolia.json exists).
+ */
+export const supportedChains = [
+  monadTestnet,
+  hyperliquidEvmTestnet,
+  sepolia,
+  monad,
+  hyperEvm,
+  mainnet,
+  anvil,
+] as const satisfies readonly Chain[];
 
 export const chainById = (id: number): Chain | undefined => supportedChains.find((c) => c.id === id);
 
