@@ -95,7 +95,7 @@ contract InvariantsTest is Test {
         for (uint256 i; i < h.poolsLength(); ++i) {
             IConfluere.PoolView memory v = core.pool(h.pools(i));
             poolAsset += v.assetBal;
-            poolQuote += v.quoteBal + v.surplusBal;
+            poolQuote += v.quoteBal + v.surplusBal + v.feeEscrow;
         }
         (uint256 pendAsset, uint256 pendQuote) = _pending();
         assertEq(weth.balanceOf(address(core)), escAsset + poolAsset + pendAsset, "asset accounting");

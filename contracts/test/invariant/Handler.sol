@@ -210,8 +210,9 @@ contract Handler is Test {
         uint256 price;
         for (uint256 j; j < logs.length; ++j) {
             if (logs[j].topics[0] == IConfluere.BatchSettled.selector) {
-                (uint256 pr, uint256 compUnits, uint256 ncUnits) = abi.decode(logs[j].data, (uint256, uint256, uint256));
-                if (ncUnits * 2 > compUnits) ncCapViolated = true;
+                (uint256 pr, uint256 compUnits, uint256 ncUnits,,, uint256 capBase) =
+                    abi.decode(logs[j].data, (uint256, uint256, uint256, uint256, uint256, uint256));
+                if (ncUnits * 2 > capBase || compUnits > capBase) ncCapViolated = true;
                 filledUnits[pid] += compUnits + ncUnits;
                 price = pr;
             }
