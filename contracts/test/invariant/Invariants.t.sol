@@ -46,10 +46,18 @@ contract InvariantsTest is Test {
         weth.approve(address(core), type(uint256).max);
         usdc.approve(address(core), type(uint256).max);
         bytes32[] memory ps = new bytes32[](3);
-        ps[0] = core.createPool(PoolKey(address(weth), address(usdc), ANCHOR + WEEK, 3000e6, Kind.American), 1000, 800);
-        ps[1] =
-            core.createPool(PoolKey(address(weth), address(usdc), ANCHOR + 2 * WEEK, 3000e6, Kind.American), 1000, 800);
-        ps[2] = core.createPool(PoolKey(address(weth), address(usdc), ANCHOR + WEEK, 3100e6, Kind.European), 1500, 150);
+        ps[0] = core.createPool(
+            PoolKey(address(weth), address(usdc), ANCHOR + WEEK, 3000e6, Kind.American, 800, 0),
+            IConfluere.PoolOptions(0, 0, 0, false)
+        );
+        ps[1] = core.createPool(
+            PoolKey(address(weth), address(usdc), ANCHOR + 2 * WEEK, 3000e6, Kind.American, 800, 0),
+            IConfluere.PoolOptions(0, 0, 0, false)
+        );
+        ps[2] = core.createPool(
+            PoolKey(address(weth), address(usdc), ANCHOR + WEEK, 3100e6, Kind.European, 150, 0),
+            IConfluere.PoolOptions(0, 0, 0, false)
+        );
 
         address[] memory as_ = new address[](4);
         for (uint256 i; i < 4; ++i) {
