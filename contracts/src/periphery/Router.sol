@@ -6,6 +6,7 @@ import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol
 import {IConfluere} from "../interfaces/IConfluere.sol";
 import {PoolKeyLib} from "../libraries/PoolKey.sol";
 import {SELL, BUY, NC_SELL, NC_BUY} from "../libraries/OrderSet.sol";
+import {Settlement} from "../libraries/Settlement.sol";
 import {Clearing} from "../libraries/Clearing.sol";
 
 interface IConfluere6909 {
@@ -75,6 +76,6 @@ contract Router {
     {
         if (p.side == SELL || p.side == NC_SELL) return (v.key.asset, p.units);
         if (p.side == NC_BUY) return (v.key.quote, p.budget);
-        return (v.key.quote, Clearing.quoteUp(p.units, p.limit, 10 ** uint256(v.assetDecimals)) + p.ttl);
+        return (v.key.quote, Settlement.buyEscrow(p.units, p.limit, 10 ** uint256(v.assetDecimals), p.ttl));
     }
 }
