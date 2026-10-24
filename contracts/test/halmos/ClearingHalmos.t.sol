@@ -32,18 +32,17 @@ contract ClearingHalmos is Test {
         assert(up >= down && up - down <= 1);
     }
 
-    /// Spread share is zero when vwap >= K, so repay can never underflow on an abnormal vwap.
-    function check_feeZeroWhenNoInterest(uint64 units, uint64 strike, uint64 vwap, uint16 feeBps) public pure {
-        vm.assume(vwap >= strike);
-        assert(Settlement.fee(units, strike, vwap, feeBps, E18) == 0);
+    /// Spread share is zero when P* >= K, so a fill at or above K never pays into the escrow.
+    function check_spreadZeroWhenNoInterest(uint64 units, uint64 strike, uint64 price) public pure {
+        vm.assume(price >= strike);
+        assert(Settlement.spreadShare(units, strike, price, E18) == 0);
     }
 
-    /// Spread share never exceeds what the borrower pays.
-    /// NOT in the check_ set: times out at 600 s per query (nonlinear 256-bit mul/div); covered by
-    /// testFuzz_feeNeverExceedsRepay. Run explicitly with `halmos --function slow_`.
-    function slow_feeBounded(uint64 units, uint64 strike, uint64 vwap, uint16 feeBps) public pure {
-        vm.assume(feeBps <= 10_000 && vwap < strike);
-        assert(Settlement.fee(units, strike, vwap, feeBps, E18) <= Settlement.repayAmount(units, strike, E18));
+    /// The seller split always adds back to the gross: spread capped, fees never make a fill revert.
+    /// NOT in the check_ set (nonlinear mul/div); covered by testFuzz_sellSplitNeverUnderflows.
+    function slow_sellSplitConserves(uint64 units, uint64 strike, uint64 price) public pure {
+        (uint256 gross, uint256 spread, uint256 trade, uint256 net) = Settlement.sellSplit(units, price, strike, E18);
+        assert(gross == spread + trade + net);
     }
 
     /// A non-competitive buy sized from its budget never costs more than the budget.
