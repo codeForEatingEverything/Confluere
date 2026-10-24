@@ -529,13 +529,19 @@ trade_rounds() {
   run "tick: settle due pools" script/Seed.s.sol 0 --sig "tick()"
 }
 
-# Regenerate what reads deployments/*.json: SDK addresses and, on Monad, the CRE workflow config (receiver, vaults,
-# live pools; the workflow targets monad-testnet only).
+# Regenerate what reads deployments/*.json: SDK addresses and the CRE workflow config (receiver, vaults, live pools).
+# One CRE config per chain (services/keeper-cre/scripts/sync-config.mjs CRE_CHAINS): Monad testnet writes
+# config.staging.json, Sepolia config.sepolia.json (created on its first sync). Sepolia's scan from deployBlock does not
+# use $R: publicnode prunes logs older than ~10,000 blocks, so sync-config takes its own archive RPC (1,000-block
+# chunks) unless SEPOLIA_LOGS_RPC names another. HyperEVM testnet has no CRE workflow.
 sync_offchain() {
   (cd "$ROOT/packages/sdk" && node scripts/sync-deployments.mjs && pnpm -s build)
   if [ "$CHAIN" = monad ]; then
     (cd "$ROOT" && DEPLOYMENT=monad-testnet RPC_URL="$R" pnpm --filter @confluere/keeper-cre -s sync-config)
+  elif [ "$CHAIN" = sepolia ]; then
+    (cd "$ROOT" && env DEPLOYMENT=sepolia CRE_CONFIG=config.sepolia.json ${SEPOLIA_LOGS_RPC:+RPC_URL="$SEPOLIA_LOGS_RPC"} \
+      pnpm --filter @confluere/keeper-cre -s sync-config)
   else
-    echo "CRE config not touched: the workflow targets monad-testnet only"
+    echo "CRE config not touched: no CRE workflow for $NAME"
   fi
 }
