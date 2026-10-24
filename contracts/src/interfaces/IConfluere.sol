@@ -30,6 +30,7 @@ interface IConfluere {
         PoolKey key;
         Status status;
         uint8 assetDecimals;
+        int16 strikeIndex;
         uint8 bandFailures;
         uint32 settleCount;
         uint64 lastSettledBatch;
@@ -57,7 +58,7 @@ interface IConfluere {
         bool bad; // paused or circuit breaker tripped at this expiry
     }
 
-    event PoolCreated(bytes32 indexed poolId, PoolKey key, bytes32 indexed marketId);
+    event PoolCreated(bytes32 indexed poolId, PoolKey key, int16 strikeIndex, bytes32 indexed marketId);
     event PoolOptionsSet(bytes32 indexed poolId, uint96 minFill, uint96 firstLo, uint96 firstHi, bool autoSell);
     event OrderPlaced(
         bytes32 indexed poolId,
@@ -108,7 +109,9 @@ interface IConfluere {
     error Locked();
     error FlashFailed();
 
-    function createPool(PoolKey calldata key, PoolOptions calldata opts) external returns (bytes32 poolId);
+    function createPool(PoolKey calldata key, int16 strikeIndex, PoolOptions calldata opts)
+        external
+        returns (bytes32 poolId);
     function placeOrder(bytes32 poolId, OrderParams calldata p) external returns (uint64 orderId);
     function placeLockedOrder(bytes32 poolId, OrderParams calldata p) external returns (uint64 orderId);
     function cancelOrder(bytes32 poolId, uint64 orderId) external;
