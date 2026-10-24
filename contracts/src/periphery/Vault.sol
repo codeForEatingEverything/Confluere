@@ -19,7 +19,7 @@ import {IERC7575} from "@openzeppelin/community-contracts/interfaces/IERC7575.so
 
 import {IConfluere} from "../interfaces/IConfluere.sol";
 import {PoolKey, PoolKeyLib, Kind, Status} from "../libraries/PoolKey.sol";
-import {GridConfig} from "../libraries/Grid.sol";
+import {GridConfig, Grid} from "../libraries/Grid.sol";
 import {NC_BUY} from "../libraries/OrderSet.sol";
 
 /// @title Vault
@@ -38,9 +38,11 @@ contract Vault is ERC20, IERC7540, ReentrancyGuardTransient {
     using PoolKeyLib for PoolKey;
     using PoolKeyLib for bytes32;
 
+    /// MainTier: last expiry's tier (strike, band, cadence) with the most volume. HighTier: the highest strike within
+    /// `HIGH_SCAN` grid steps above the main tier whose volume is at least 20% of the main tier's.
     enum StrikeRule {
-        LowestTraded,
-        HighestTraded
+        MainTier,
+        HighTier
     }
 
     struct Strategy {
@@ -82,6 +84,8 @@ contract Vault is ERC20, IERC7540, ReentrancyGuardTransient {
     event AssetsClaimed(address indexed account, address indexed asset, uint256 amount);
 
     uint256 internal constant ACC = 1e27;
+    uint256 internal constant HIGH_SCAN = 40; // grid steps scanned above the main tier (~ +49%)
+    uint256 internal constant HIGH_SHARE_BPS = 2000; // a high tier needs >= 20% of the main tier's volume
     uint256 internal constant BPS = 10_000;
 
     IConfluere public immutable core;
@@ -155,14 +159,16 @@ contract Vault is ERC20, IERC7540, ReentrancyGuardTransient {
         uint256 budget = Math.mulDiv(investable(), perBatchCapBps, BPS);
         uint256 n = _assets.length;
         for (uint256 i; i < n; ++i) {
-            (bytes32 pid, uint96 strike, uint32 settleCount) = _target(_assets[i]);
+            (bytes32 pid, uint96 limit, uint32 settleCount) = _target(_assets[i]);
             if (pid == bytes32(0) || budget / n == 0 || pokedSettle[pid] > settleCount) continue;
             pokedSettle[pid] = settleCount + 1; // a ttl-1 order takes part in the pool's next settlement only
             IConfluere.OrderParams memory p;
             p.side = NC_BUY;
+            // all-in: the core takes the buyer's trade fee out of the budget, so costBasis += budget stays exact
             p.budget = uint128(budget / n);
-            p.limit = uint96(uint256(strike) * maxPriceBps / BPS);
+            p.limit = limit;
             p.ttl = 1;
+            p.hint = core.findHint(pid, NC_BUY, limit);
             uint64 id = core.placeOrder(pid, p);
             costBasis += budget / n;
             _track(pid, id);
@@ -171,22 +177,79 @@ contract Vault is ERC20, IERC7540, ReentrancyGuardTransient {
     }
 
     /// @notice The pool the strategy targets for `asset` this epoch, or 0 if none qualifies.
-    /// The strike is last expiry's lowest (or highest) traded strike in that market; the market must be graduated.
+    /// The tier comes from last expiry's per-tier volume in a graduated market (main tier, or the highest tier with at
+    /// least 20% of its volume), must have traded at two consecutive expiries, and the pool must use autoSell.
     function targetPool(address token) public view returns (bytes32 pid) {
         (pid,,) = _target(token);
     }
 
+    /// @notice The price cap of this epoch's buys in `targetPool(token)` (0 if no target).
+    function targetLimit(address token) external view returns (uint96 limit) {
+        (, limit,) = _target(token);
+    }
+
+    /// @dev Vault guard against wash-steering: the reference is the volume-weighted clearing price of last expiry's main
+    /// tier (the market's deepest tier, which a wash trade must outtrade to move). A tier qualifies only if its last
+    /// clearing price at that expiry lies within the main tier's band of the reference, and the vault's limit is
+    /// min(K x maxPriceBps, K - 1, reference x (1 + band)). No reference -> no investment.
     function _target(address token) internal view returns (bytes32, uint96, uint32) {
         bytes32 m = PoolKeyLib.marketId(token, _quote, kind);
         if (!core.graduated(m)) return (bytes32(0), 0, 0);
-        IConfluere.MarketStats memory st = core.marketStats(m, targetExpiry - core.grid().period);
-        // main tier of the last expiry (both rules until the high-tier scan lands in the periphery change)
-        uint96 strike = st.mainStrike;
-        if (strike == 0) return (bytes32(0), 0, 0);
-        bytes32 pid = PoolKey(token, _quote, targetExpiry, strike, kind, st.mainBand, st.mainCadence).toId();
+        uint64 period = core.grid().period;
+        uint64 prev = targetExpiry - period;
+        IConfluere.MarketStats memory st = core.marketStats(m, prev);
+        if (st.mainVolume == 0) return (bytes32(0), 0, 0);
+        PoolKey memory pk = PoolKey(token, _quote, prev, st.mainStrike, kind, st.mainBand, st.mainCadence);
+        uint256 ref;
+        {
+            IConfluere.PoolView memory mv = core.pool(pk.toId());
+            if (mv.filledUnits == 0) return (bytes32(0), 0, 0);
+            ref = Math.mulDiv(st.mainVolume, 10 ** mv.assetDecimals, mv.filledUnits);
+        }
+        if (ref == 0) return (bytes32(0), 0, 0);
+        uint256 cap = Math.mulDiv(ref, BPS + st.mainBand, BPS);
+        uint256 floor_ = Math.mulDiv(ref, BPS - st.mainBand, BPS);
+        uint128 strike = st.mainStrike;
+        if (strikeRule == StrikeRule.HighTier) {
+            uint128 hi = _highTier(m, pk, st.mainIndex, uint256(st.mainVolume) * HIGH_SHARE_BPS, floor_, cap);
+            if (hi != 0) strike = hi;
+        }
+        // two traded expiries in this tier
+        if (core.tierVolume(m, prev - period, PoolKeyLib.tierKey(strike, st.mainBand, st.mainCadence)) == 0) {
+            return (bytes32(0), 0, 0);
+        }
+        pk.expiry = targetExpiry;
+        pk.strike = strike;
+        bytes32 pid = pk.toId();
         IConfluere.PoolView memory v = core.pool(pid);
-        if (v.status == Status.Open) return (pid, strike, v.settleCount);
-        return (bytes32(0), 0, 0);
+        if (v.status != Status.Open || !v.options.autoSell) return (bytes32(0), 0, 0);
+        uint256 limit = Math.min(Math.min(uint256(strike) * maxPriceBps / BPS, uint256(strike) - 1), cap);
+        if (limit == 0 || limit > type(uint96).max) return (bytes32(0), 0, 0);
+        return (pid, uint96(limit), v.settleCount);
+    }
+
+    /// @dev Highest strike within HIGH_SCAN grid steps above the main tier (same band and cadence) with >= 20% of the
+    /// main tier's volume whose last clearing price at `pk.expiry` is inside [floor_, cap]; 0 if none.
+    /// `pk` is the main tier's key at the previous expiry (its strike is overwritten).
+    function _highTier(bytes32 m, PoolKey memory pk, int256 mainIndex, uint256 minVol, uint256 floor_, uint256 cap)
+        internal
+        view
+        returns (uint128)
+    {
+        for (uint256 j = HIGH_SCAN; j != 0; --j) {
+            if (mainIndex + int256(j) > Grid.MAX_STRIKE_INDEX) continue;
+            uint256 k = Grid.strikeAt(mainIndex + int256(j), IERC20Metadata(_quote).decimals());
+            if (k == 0 || k > type(uint96).max) continue;
+            pk.strike = uint128(k);
+            if (_tierVolume(m, pk) * BPS < minVol) continue;
+            uint256 lcp = core.pool(pk.toId()).lastClearingPrice;
+            if (lcp >= floor_ && lcp <= cap) return uint128(k);
+        }
+        return 0;
+    }
+
+    function _tierVolume(bytes32 m, PoolKey memory pk) internal view returns (uint256) {
+        return core.tierVolume(m, pk.expiry, PoolKeyLib.tierKey(pk.strike, pk.bandBps, pk.cadence));
     }
 
     /// @notice Quote the vault may still invest this epoch: idle minus queued deposits, reserved redemptions and an
