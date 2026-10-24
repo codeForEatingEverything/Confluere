@@ -154,8 +154,8 @@ describe("vocabulary", () => {
     expect(vaultLine("pegged", { strikeRule: 0 }, "WMON", "shMON", "MON")).toBe("Lends MON to shMON borrowers");
     const [a, b, c] = vaultSentences({ strikeRule: 1, capBps: 2500 }, "USDC", "WHYPE");
     expect(a).toBe("This vault lends USDC to borrowers who sold WHYPE into the market. It never buys or holds WHYPE on purpose.");
-    expect(b).toBe("If a borrower doesn't repay, the vault receives their WHYPE. When you withdraw, you may get some WHYPE along with USDC.");
-    expect(c).toBe("Rule, fixed at deployment: lend at the higher buy-back price, at most 25% of idle funds each round, only into established markets. Nobody can change it.");
+    expect(b).toBe("If a borrower doesn't repay, their WHYPE is sold into the next maturity and the vault gets USDC back. You always withdraw in USDC only.");
+    expect(c).toBe("Rule, fixed at deployment: lend at the higher buy-back price, at most 25% of idle funds each round, only into established markets that sell unrepaid collateral. Nobody can change it.");
     for (const s of [a, b, c]) expect(s).not.toMatch(/stake|LST|liquidat/i);
   });
   it("network names and price sources", () => {

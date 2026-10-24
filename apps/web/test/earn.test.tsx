@@ -96,8 +96,8 @@ describe("earn", () => {
     const d = screen.getByTestId("vault-drawer");
     const s = within(d).getByTestId("vault-sentences").textContent!;
     expect(s).toContain("This vault lends USDC to borrowers who sold WETH into the market. It never buys or holds WETH on purpose.");
-    expect(s).toContain("If a borrower doesn't repay, the vault receives their WETH. When you withdraw, you may get some WETH along with USDC.");
-    expect(s).toContain("Rule, fixed at deployment: lend at the lower buy-back price, at most 25% of idle funds each round, only into established markets. Nobody can change it.");
+    expect(s).toContain("If a borrower doesn't repay, their WETH is sold into the next maturity and the vault gets USDC back. You always withdraw in USDC only.");
+    expect(s).toContain("Rule, fixed at deployment: lend at the lower buy-back price, at most 25% of idle funds each round, only into established markets that sell unrepaid collateral. Nobody can change it.");
     expect(within(d).getByText("Total deposits")).toBeTruthy();
     expect(within(d).getByText("1.00 USDC")).toBeTruthy(); // your position: 1e12 shares × 4.84 / 4.84e12
     expect(within(d).getByText(/Deposits are collected now and start lending at the next period/)).toBeTruthy();
