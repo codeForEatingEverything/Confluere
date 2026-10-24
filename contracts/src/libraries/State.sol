@@ -22,6 +22,7 @@ struct PoolState {
     uint64 lastSettledBatch;
     uint64 windowEnd;
     uint64 pausedUntil;
+    uint64 pausedBlocks; // cumulative guardian pause granted to this pool, capped at MAX_PAUSE_BLOCKS
     uint96 lastClearingPrice;
     uint96 bandBase;
     uint8 cadence; // batch interval = base interval * {1, 12, 48}[cadence]
