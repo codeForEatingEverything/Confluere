@@ -62,7 +62,7 @@ contract Confluere is IConfluere, IERC6909TokenSupply, IERC3156FlashLender, Reen
         address treasury;
         address guardian;
         address[] graduationQuotes;
-        uint256[] graduationVolumes;
+        uint256[] graduationFees;
         address[] minNotionalQuotes; // anti-dust: smallest order per quote token, valued at K
         uint256[] minNotionals;
     }
@@ -86,8 +86,7 @@ contract Confluere is IConfluere, IERC6909TokenSupply, IERC3156FlashLender, Reen
         if (k == type(uint256).max) revert UnsupportedChain();
         ChainParams memory cp = c.chains[k];
         if (
-            cp.windowBlocks == 0 || cp.treasury == address(0)
-                || cp.graduationQuotes.length != cp.graduationVolumes.length
+            cp.windowBlocks == 0 || cp.treasury == address(0) || cp.graduationQuotes.length != cp.graduationFees.length
                 || cp.minNotionalQuotes.length != cp.minNotionals.length
         ) revert InvalidParams();
         GRID_ANCHOR = c.grid.anchor;
@@ -102,7 +101,7 @@ contract Confluere is IConfluere, IERC6909TokenSupply, IERC3156FlashLender, Reen
         treasury = cp.treasury;
         guardian = cp.guardian;
         for (uint256 i; i < cp.graduationQuotes.length; ++i) {
-            s.graduationVolume[cp.graduationQuotes[i]] = cp.graduationVolumes[i];
+            s.graduationFee[cp.graduationQuotes[i]] = cp.graduationFees[i];
         }
         for (uint256 i; i < cp.minNotionalQuotes.length; ++i) {
             s.minNotional[cp.minNotionalQuotes[i]] = cp.minNotionals[i];
@@ -188,7 +187,7 @@ contract Confluere is IConfluere, IERC6909TokenSupply, IERC3156FlashLender, Reen
 
     /// @inheritdoc IConfluere
     function repay(bytes32 poolId, uint96 units) external nonReentrant {
-        WindowLogic.repay(s, _params(), poolId, units);
+        WindowLogic.repay(s, poolId, units);
     }
 
     /// @inheritdoc IConfluere
@@ -202,7 +201,7 @@ contract Confluere is IConfluere, IERC6909TokenSupply, IERC3156FlashLender, Reen
 
     /// @inheritdoc IConfluere
     function closeWindow(bytes32 poolId, uint256 maxBids) external nonReentrant returns (bool) {
-        return WindowLogic.closeWindow(s, poolId, maxBids);
+        return WindowLogic.closeWindow(s, _params(), poolId, maxBids);
     }
 
     /// @inheritdoc IConfluere
@@ -236,10 +235,10 @@ contract Confluere is IConfluere, IERC6909TokenSupply, IERC3156FlashLender, Reen
 
     /// @inheritdoc IConfluere
     /// @dev Permissionless. A market graduates after GRADUATION_CYCLES consecutive past expiries that each reached
-    /// the per-quote volume baseline with no pause and no circuit breaker. Graduation is permanent.
+    /// the per-quote treasury-fee baseline (trade fees + spread share) with no pause and no circuit breaker. Graduation is permanent.
     function graduate(address asset, address quote, Kind kind, uint64 lastExpiry) external {
         bytes32 m = PoolKeyLib.marketId(asset, quote, kind);
-        uint256 threshold = s.graduationVolume[quote];
+        uint256 threshold = s.graduationFee[quote];
         GridConfig memory g = grid();
         if (s.graduated[m] || threshold == 0 || !Grid.isOnGrid(g, lastExpiry) || lastExpiry >= block.timestamp) {
             revert InvalidParams();
@@ -247,7 +246,7 @@ contract Confluere is IConfluere, IERC6909TokenSupply, IERC3156FlashLender, Reen
         if (lastExpiry < g.anchor + uint256(g.period) * (GRADUATION_CYCLES - 1)) revert InvalidParams();
         for (uint256 i; i < GRADUATION_CYCLES; ++i) {
             MarketStats storage st = s.stats[m][uint64(lastExpiry - i * g.period)];
-            if (st.bad || st.volume < threshold) revert InvalidState();
+            if (st.bad || st.fees < threshold) revert InvalidState();
         }
         s.graduated[m] = true;
         emit PoolGraduated(m, lastExpiry);
@@ -359,7 +358,9 @@ contract Confluere is IConfluere, IERC6909TokenSupply, IERC3156FlashLender, Reen
         v.quoteBal = ps.quoteBal;
         v.assetBal = ps.assetBal;
         v.surplusBal = ps.surplusBal;
-        v.vwap = CoreLib.vwap(ps);
+        v.feeEscrow = ps.feeEscrow;
+        v.filledUnits = ps.filledUnits;
+        v.repaidUnits = ps.repaidUnits;
         v.closeRemaining = ps.closeRemaining;
         v.options = PoolOptions(ps.cadence, ps.minFill, ps.firstLo, ps.firstHi);
         v.batchInterval = uint64(ps.interval(GRID_BATCH));
@@ -393,10 +394,6 @@ contract Confluere is IConfluere, IERC6909TokenSupply, IERC3156FlashLender, Reen
         return uint256(GRID_ANCHOR) + uint256(ps.lastSettledBatch + 1) * ps.interval(GRID_BATCH);
     }
 
-    function vwap(bytes32 poolId) external view returns (uint256) {
-        return CoreLib.vwap(s.pools[poolId]);
-    }
-
     function expiryWindowEnd(uint64 expiry) external view returns (uint64) {
         return s.windowEnd[expiry];
     }
@@ -405,8 +402,8 @@ contract Confluere is IConfluere, IERC6909TokenSupply, IERC3156FlashLender, Reen
         return s.graduated[marketId];
     }
 
-    function graduationVolume(address quote) external view returns (uint256) {
-        return s.graduationVolume[quote];
+    function graduationFee(address quote) external view returns (uint256) {
+        return s.graduationFee[quote];
     }
 
     /// @notice Cumulative spread share collected in a market (in its quote token). Lets the treasury split fees
