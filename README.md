@@ -7,6 +7,9 @@
 <a href="https://jupyter.org"><img src="https://img.shields.io/badge/Jupyter-Notebook-blue?logo=jupyter" alt="JupyterNotebook"></a>
 </p>
 
+> [!IMPORTANT]
+> **Archived 2026-10-24.** This repository has been merged into the main repo as [`Confluere/simulation`](https://github.com/codeForEatingEverything/Confluere/tree/main/simulation) with its full history; further work happens there.
+
 > [!NOTE]
 > This repository is designed for test and research in general for [Confluere](https://github.com/codeForEatingEverything/Confluere)
 
