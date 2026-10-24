@@ -6,7 +6,9 @@
   "scripts": {
     "compile": "bun x cre-compile src/main.ts dist/workflow.wasm",
     "simulate": "cre workflow simulate . --target staging-settings --non-interactive --trigger-index 0",
+    "simulate:sepolia": "cre workflow simulate . --target sepolia-settings --non-interactive --trigger-index 0",
     "sync-config": "node scripts/sync-config.mjs",
+    "sync-config:sepolia": "DEPLOYMENT=sepolia node scripts/sync-config.mjs",
     "typecheck": "tsc --noEmit",
     "test": "vitest run"
   },
