@@ -67,7 +67,7 @@ contract ClearingFuzzTest is Base {
 
     function _escQ(bytes32 pid) internal view returns (uint256 escQ) {
         for (uint64 id = 1; id < 20; ++id) {
-            (address owner, uint8 side,,, uint128 esc,,) = core.order(pid, id);
+            (address owner, uint8 side,,,, uint128 esc,,) = core.order(pid, id);
             if (owner != address(0) && side == 1) escQ += esc;
         }
     }
