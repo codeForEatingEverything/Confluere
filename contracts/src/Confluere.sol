@@ -111,21 +111,8 @@ contract Confluere is IConfluere, IERC6909TokenSupply, IERC3156FlashLender, Reen
     // ================================================================ pools
 
     /// @inheritdoc IConfluere
-    function createPool(PoolKey calldata key, uint16 feeBps, uint16 bandBps)
-        external
-        nonReentrant
-        returns (bytes32 poolId)
-    {
-        return OrderLogic.createPool(s, grid(), key, feeBps, bandBps, PoolOptions(0, 0, 0, 0));
-    }
-
-    /// @inheritdoc IConfluere
-    function createPoolWithOptions(PoolKey calldata key, uint16 feeBps, uint16 bandBps, PoolOptions calldata opts)
-        external
-        nonReentrant
-        returns (bytes32 poolId)
-    {
-        return OrderLogic.createPool(s, grid(), key, feeBps, bandBps, opts);
+    function createPool(PoolKey calldata key, PoolOptions calldata opts) external nonReentrant returns (bytes32) {
+        return OrderLogic.createPool(s, grid(), key, opts);
     }
 
     // ================================================================ orders
@@ -320,8 +307,6 @@ contract Confluere is IConfluere, IERC6909TokenSupply, IERC3156FlashLender, Reen
         v.key = ps.key;
         v.status = ps.status;
         v.assetDecimals = ps.assetDecimals;
-        v.feeBps = ps.feeBps;
-        v.bandBps = ps.bandBps;
         v.bandFailures = ps.bandFailures;
         v.settleCount = ps.settleCount;
         v.lastSettledBatch = ps.lastSettledBatch;
@@ -337,7 +322,7 @@ contract Confluere is IConfluere, IERC6909TokenSupply, IERC3156FlashLender, Reen
         v.filledUnits = ps.filledUnits;
         v.repaidUnits = ps.repaidUnits;
         v.closeRemaining = ps.closeRemaining;
-        v.options = PoolOptions(ps.cadence, ps.minFill, ps.firstLo, ps.firstHi);
+        v.options = PoolOptions(ps.minFill, ps.firstLo, ps.firstHi, ps.autoSell);
         v.batchInterval = uint64(ps.interval(GRID_BATCH));
     }
 
