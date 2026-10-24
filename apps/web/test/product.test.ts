@@ -48,9 +48,9 @@ describe("termsFor", () => {
 
   it("prices each offer: receive and repay per unit, fixed APR, gap to the reference", () => {
     const o = termsFor(pools as never, { ...q, ref: 3100, quoteDecimals: 6 })[0]!.offers[1]!;
-    expect(o.receivePerUnit).toBe(2900_000000n);
+    expect(o.receivePerUnit).toBe(2894_565000n); // 2,900 − 0.015% trade fee − 5% of the 100 interest
     expect(o.repayPerUnit).toBe(3000_000000n);
-    expect(o.apr).toBeCloseTo((100 / 2900) * (365 / 3), 6);
+    expect(o.apr).toBeCloseTo((99.565 / 2900.435) * (365 / 3), 6); // lender pays the trade fee too
     expect(o.haircutVsRef).toBeCloseTo(1 - 2900 / 3100, 9);
     expect(o.repayVsRef).toBeCloseTo(3000 / 3100, 9);
     expect(o.discount).toBeCloseTo(100 / 3000, 9);
@@ -106,11 +106,12 @@ describe("pickLendOffer", () => {
 describe("amounts", () => {
   const o = termsFor(pools as never, q)[0]!.offers[1]!; // price 2900, buy-back 3000, 18-decimal collateral
   it("receive, repay, units for a target and lender units round like the contract", () => {
-    expect(borrowReceive(o, E18 / 2n)).toBe(1450_000000n);
+    expect(borrowReceive(o, E18 / 2n)).toBe(1447_282500n); // 1,450 − 0.2175 − 2.5
     expect(borrowRepay(o, 1n)).toBe(1n); // rounds up
-    expect(unitsForQuote(o, 2900_000000n)).toBe(E18);
+    expect(unitsForQuote(o, 2894_565000n)).toBe(E18);
+    expect(borrowReceive(o, unitsForQuote(o, 1234_567890n))).toBeGreaterThanOrEqual(1234_567890n);
     expect(unitsForQuote(o, 1n) * 2900_000000n >= 1n * E18).toBe(true);
-    expect(lendUnits(o, 2900_000000n)).toBe(E18);
+    expect(lendUnits(o, 2900_435002n)).toBe(E18); // all-in budget: cost + 0.015% trade fee
     expect(lendPayout(o, E18)).toBe(3000_000000n);
   });
 });

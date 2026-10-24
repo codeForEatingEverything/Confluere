@@ -145,7 +145,7 @@ describe("home card on HyperEVM", () => {
     expect(rows[0]!.textContent).toMatch(/5\.00/);
     fireEvent.click(rows[1]!);
     fireEvent.change(screen.getByTestId("pay-input"), { target: { value: "1" } });
-    expect(screen.getByTestId("borrow-button").textContent).toMatch(/^Borrow 38\.00 USDC/);
+    expect(screen.getByTestId("borrow-button").textContent).toMatch(/^Borrow 37\.89 USDC/);
   });
 
   it("short of WHYPE but holding HYPE: offers to pay with HYPE instead, never a separate wrap button", () => {

@@ -142,8 +142,8 @@ describe("market drawer", () => {
     fireEvent.change(within(card).getByTestId("pool-borrow-input"), { target: { value: "20" } });
     expect(btn().textContent).toBe("Not enough WETH");
     fireEvent.change(within(card).getByTestId("pool-borrow-input"), { target: { value: "1" } });
-    expect(btn().textContent).toBe("Borrow 2,900.00 USDC");
-    expect(within(card).getByTestId("pool-borrow-receive").textContent).toMatch(/You receive about 2,900\.00 USDC and 1\.00 R-WETH, your right to buy it back\./);
+    expect(btn().textContent).toBe("Borrow 2,894.57 USDC"); // 2,900 − 0.015% trade fee − 5% of the interest
+    expect(within(card).getByTestId("pool-borrow-receive").textContent).toMatch(/You receive about 2,894\.57 USDC and 1\.00 R-WETH, your right to buy it back\./);
     fireEvent.click(btn());
     const m = screen.getByTestId("review-modal");
     fireEvent.click(within(m).getByTestId("place-order"));
@@ -159,8 +159,8 @@ describe("market drawer", () => {
     expect(within(card).getByTestId("trade-ft").getAttribute("aria-checked")).toBe("true");
     expect(within(card).getByTestId("trade-lend").getAttribute("aria-checked")).toBe("true");
     expect(within(card).getByTestId("lend-terms").textContent).toMatch(/Paid back per 1 WETH/);
-    fireEvent.change(within(card).getByTestId("lend-input"), { target: { value: "2900" } });
-    expect(within(card).getByTestId("lend-button").textContent).toBe("Lend 2,900.00 USDC");
+    fireEvent.change(within(card).getByTestId("lend-input"), { target: { value: "2900.44" } }); // all-in: 2,900 plus the 0.015% trade fee
+    expect(within(card).getByTestId("lend-button").textContent).toBe("Lend 2,900.44 USDC");
     expect(within(card).getByTestId("outcome-strip").textContent).toContain("You receive 1.00 WETH instead");
     expect(within(card).getByTestId("lend-receive").textContent).toMatch(/≈ 1\.00 C-WETH/);
   });
