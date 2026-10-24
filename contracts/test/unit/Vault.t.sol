@@ -7,6 +7,8 @@ import {IConfluere} from "../../src/interfaces/IConfluere.sol";
 import {Kind, Status} from "../../src/libraries/PoolKey.sol";
 import {NC_SELL, NC_BUY} from "../../src/libraries/OrderSet.sol";
 import {Vault} from "../../src/periphery/Vault.sol";
+import {Grid} from "../../src/libraries/Grid.sol";
+import {PoolKeyLib} from "../../src/libraries/PoolKey.sol";
 
 /// @dev Graduated WETH/USDC American market, target pool `p5` (cadence from `_cadence`), one vault.
 abstract contract VaultBase is Base {
@@ -25,7 +27,7 @@ abstract contract VaultBase is Base {
         c.chains[0].graduationFees[0] = 0.8e6; // trade fees of one 1-ETH fill at 2900: 2 x 0.435 USDC
     }
 
-    function setUp() public override {
+    function setUp() public virtual override {
         super.setUp();
         // four clean weeks graduate the WETH/USDC American market
         for (uint64 i = 1; i <= 4; ++i) {
@@ -36,12 +38,12 @@ abstract contract VaultBase is Base {
             _sell(alice, pid, ONE, 2900e6);
             _buy(bob, pid, ONE, 2900e6);
             _settle(pid);
+            _extraTiers(e);
         }
         vm.warp(E4 + 1);
         core.graduate(address(weth), address(usdc), Kind.American, E4);
-        p5 = _cadence() == 0
-            ? _create(K, Kind.American, E5)
-            : _createKey(core, _keyT(K, Kind.American, E5, 800, _cadence()), _noOpts());
+        // vaults only invest in autoSell pools
+        p5 = _createKey(core, _keyT(K, Kind.American, E5, 800, _cadence()), IConfluere.PoolOptions(0, 0, 0, true));
 
         address[] memory as_ = new address[](1);
         as_[0] = address(weth);
@@ -51,7 +53,7 @@ abstract contract VaultBase is Base {
                 quote: address(usdc),
                 assets: as_,
                 kind: Kind.American,
-                strikeRule: Vault.StrikeRule.LowestTraded,
+                strikeRule: Vault.StrikeRule.MainTier,
                 perBatchCapBps: 2500,
                 maxPriceBps: 9900
             }),
@@ -69,6 +71,9 @@ abstract contract VaultBase is Base {
     function _cadence() internal pure virtual returns (uint8) {
         return 0;
     }
+
+    /// @dev Hook for more tiers traded at expiry `e` during setUp.
+    function _extraTiers(uint64 e) internal virtual {}
 
     function _closeP5() internal {
         vm.warp(E5);
@@ -102,7 +107,7 @@ abstract contract VaultBase is Base {
 }
 
 contract VaultTest is VaultBase {
-    function test_targetsLowestTradedStrikeInGraduatedMarket() public view {
+    function test_target_mainTier() public view {
         assertEq(vault.targetExpiry(), E5);
         assertEq(vault.targetPool(address(weth)), p5);
     }
@@ -356,5 +361,75 @@ contract VaultLongTailTest is VaultBase {
         vm.warp(next + 2 * BATCH - 1);
         vault.poke(); // a later core batch of the same 6 h batch adds nothing
         assertEq(10_000e6 - usdc.balanceOf(address(vault)), 2500e6 + 1875e6);
+    }
+}
+
+/// @dev The wash-steer attack (blueprint 14.1): an attacker trades a far tier with itself at a price near its K, with
+/// enough volume (>= 20% of the main tier) and at two expiries, to steer a HighTier vault into lending near K there.
+/// The vault guard rejects tiers whose last clearing price is outside the main tier's band around the main VWAP.
+contract VaultTierTest is VaultBase {
+    uint128 internal hiK; // honest high tier: 5 grid steps up, trades near the main price
+    uint128 internal washK; // attacker's tier: 30 grid steps up, self-trades at washK - 1
+    bytes32 internal hi5;
+    bytes32 internal wash5;
+    Vault internal high;
+
+    function _extraTiers(uint64 e) internal override {
+        if (e < ANCHOR + 3 * WEEK) return;
+        hiK = uint128(Grid.strikeAt(810, 6));
+        washK = uint128(Grid.strikeAt(835, 6));
+        bytes32 h = _createKey(core, _keyT(hiK, Kind.American, e, 800, 0), _noOpts());
+        _sell(alice, h, 0.8e18, 2950e6);
+        _buy(bob, h, 0.8e18, 2950e6);
+        _settle(h);
+        bytes32 w = _createKey(core, _keyT(washK, Kind.American, e, 800, 0), _noOpts());
+        _sell(dave, w, 0.5e18, washK - 1);
+        _buy(dave, w, 0.5e18, washK - 1);
+        _settle(w);
+    }
+
+    function setUp() public override {
+        super.setUp();
+        IConfluere.PoolOptions memory o = IConfluere.PoolOptions(0, 0, 0, true);
+        hi5 = _createKey(core, _keyT(hiK, Kind.American, E5, 800, 0), o);
+        wash5 = _createKey(core, _keyT(washK, Kind.American, E5, 800, 0), o);
+        address[] memory as_ = new address[](1);
+        as_[0] = address(weth);
+        high = new Vault(
+            core, Vault.Strategy(address(usdc), as_, Kind.American, Vault.StrikeRule.HighTier, 2500, 9900), "H", "H"
+        );
+    }
+
+    function test_washTierHasTheVolume() public view {
+        bytes32 m = PoolKeyLib.marketId(address(weth), address(usdc), Kind.American);
+        IConfluere.MarketStats memory st = core.marketStats(m, E4);
+        assertEq(st.mainStrike, K, "main tier unchanged");
+        uint256 wv = core.tierVolume(m, E4, PoolKeyLib.tierKey(washK, 800, 0));
+        assertGe(wv * 10_000, uint256(st.mainVolume) * 2000, "wash tier clears the 20% volume bar");
+        assertGt(
+            core.tierVolume(m, ANCHOR + 3 * WEEK, PoolKeyLib.tierKey(washK, 800, 0)), 0, "and traded at two expiries"
+        );
+    }
+
+    function test_guard_stopsWashSteer_picksHonestHighTier() public view {
+        assertEq(high.targetPool(address(weth)), hi5, "highest in-band tier, not the wash tier");
+        assertTrue(high.targetPool(address(weth)) != wash5);
+        // limit: min(K x 99%, K - 1, main VWAP x (1 + 8%))
+        assertEq(high.targetLimit(address(weth)), uint96(uint256(2900e6) * 10_800 / 10_000));
+    }
+
+    function test_mainTier_limitIsKCap() public view {
+        assertEq(vault.targetPool(address(weth)), p5);
+        assertEq(vault.targetLimit(address(weth)), uint96(uint256(K) * 9900 / 10_000));
+    }
+
+    function test_target_needsAutoSell() public {
+        // a vault for the European market finds no autoSell pool: the market is not even graduated
+        address[] memory as_ = new address[](1);
+        as_[0] = address(weth);
+        Vault eu = new Vault(
+            core, Vault.Strategy(address(usdc), as_, Kind.European, Vault.StrikeRule.MainTier, 2500, 9900), "E", "E"
+        );
+        assertEq(eu.targetPool(address(weth)), bytes32(0));
     }
 }

@@ -168,7 +168,7 @@ contract PeripheryTest is Base {
         address[] memory as_ = new address[](1);
         as_[0] = address(weth);
         Vault v = f.create(
-            Vault.Strategy(address(usdc), as_, Kind.American, Vault.StrikeRule.HighestTraded, 2500, 9900),
+            Vault.Strategy(address(usdc), as_, Kind.American, Vault.StrikeRule.HighTier, 2500, 9900),
             "rvUSDC-ETH-High",
             "rvUSDC-ETH-High",
             bytes32(0)
