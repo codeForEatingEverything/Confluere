@@ -15,7 +15,10 @@ import { mkdir, readFileSync, writeFile } from "./fsCompat";
 import { join } from "node:path";
 import { decodeEventLog, parseAbi, toEventSelector, type Hex } from "viem";
 import { logRange, marketId as toMarketId } from "@confluere/sdk";
-import { CHAINLINK_HYPER_TESTNET_RPC, deploymentOf, isEnabledChain, rpcUrlsOf } from "../chains";
+import { CHAINLINK_HYPER_TESTNET_RPC, PUBLICNODE_SEPOLIA_RPC, deploymentOf, isEnabledChain, rpcUrlsOf } from "../chains";
+
+/** viem's default Sepolia RPC: full log history, at most 1,000 blocks per eth_getLogs. */
+const THIRDWEB_SEPOLIA_RPC = "https://11155111.rpc.thirdweb.com";
 import { fetchRpc, headOf, scanLogs, type LogSource, type RawLog, type Rpc } from "./logScan";
 
 export const EVENTS = parseAbi([
@@ -91,6 +94,9 @@ export const orderKey = (pool: string, id: bigint | string) => `${lc(pool)}:${id
  * Log sources per chain, widest range first. Override with LOGS_RPC_<chainId>="url|range|concurrency,...".
  * Monad: OnFinality's public endpoint serves 10,000-block ranges (one call at a time), thirdweb 1,000, the official
  * RPC 100 (logRange) at 25 req/s. HyperEVM: Chainlink's public RPC 1,000 blocks; the official one is rate-limited.
+ * Sepolia: thirdweb keeps the full log history at 1,000 blocks a call (logRange); publicnode, the read RPC, keeps only
+ * about the last 10,000 blocks of logs ("pruned history unavailable", measured 2026-10-23), so it comes after, for the
+ * recent chunks only. A NEXT_PUBLIC_RPC_URL_11155111 of your own (an archive node) is asked first.
  */
 export function logSources(chainId: number): LogSource[] {
   const env = process.env[`LOGS_RPC_${chainId}`];
@@ -107,6 +113,14 @@ export function logSources(chainId: number): LogSource[] {
       { url: "https://monad-testnet.api.onfinality.io/public", range: 10_000, concurrency: 1 },
       { url: "https://10143.rpc.thirdweb.com", range: 1_000, concurrency: 2 },
       ...rpcs.map((url) => ({ url, range: step, concurrency: 4 })),
+    ];
+  }
+  if (chainId === 11155111) {
+    const own = rpcs.filter((u) => u !== PUBLICNODE_SEPOLIA_RPC && u !== THIRDWEB_SEPOLIA_RPC);
+    return [
+      ...own.map((url) => ({ url, range: step, concurrency: 2 })),
+      { url: THIRDWEB_SEPOLIA_RPC, range: step, concurrency: 2 },
+      { url: PUBLICNODE_SEPOLIA_RPC, range: step, concurrency: 2 },
     ];
   }
   if (chainId === 998) {
