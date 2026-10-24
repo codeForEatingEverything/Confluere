@@ -14,6 +14,50 @@ library WindowLogic {
     using CoreLib for PoolState;
     using PoolKeyLib for bytes32;
 
+    uint8 internal constant GRADUATION_CYCLES = 4;
+
+    /// @notice Start (or join) the expiry's shared repayment window.
+    function mature(CoreState storage s, Params memory pr, bytes32 poolId) external {
+        PoolState storage ps = s.pool(poolId);
+        if (ps.status != Status.Open || block.timestamp < ps.key.expiry) revert IConfluere.InvalidState();
+        ps.status = Status.Window;
+        // one window per expiry: the first mature() of an expiry starts it, later pools join it
+        uint64 end = s.windowEnd[ps.key.expiry];
+        if (end == 0) s.windowEnd[ps.key.expiry] = end = uint64(block.number) + pr.windowBlocks;
+        ps.windowEnd = end;
+        emit IConfluere.Matured(poolId, end);
+    }
+
+    /// @notice Guardian pause of an un-graduated pool (the core checks the caller).
+    function pause(CoreState storage s, Params memory pr, bytes32 poolId, uint64 blocks) external {
+        PoolState storage ps = s.pool(poolId);
+        if (s.graduated[ps.marketId] || blocks == 0 || blocks > pr.maxPauseBlocks) revert IConfluere.InvalidParams();
+        uint64 until = uint64(block.number) + blocks;
+        ps.pausedUntil = until;
+        s.stats[ps.marketId][ps.key.expiry].bad = true;
+        emit IConfluere.Paused(poolId, until);
+    }
+
+    /// @notice Permissionless. A market graduates after GRADUATION_CYCLES consecutive past expiries that each reached
+    /// the per-quote treasury-fee baseline (trade fees + spread share) with no pause and no circuit breaker.
+    function graduate(CoreState storage s, Params memory pr, address asset, address quote, Kind kind, uint64 lastExpiry)
+        external
+    {
+        bytes32 m = PoolKeyLib.marketId(asset, quote, kind);
+        uint256 threshold = s.graduationFee[quote];
+        if (
+            s.graduated[m] || threshold == 0 || lastExpiry < pr.anchor || (lastExpiry - pr.anchor) % pr.period != 0
+                || lastExpiry >= block.timestamp
+        ) revert IConfluere.InvalidParams();
+        if (lastExpiry < pr.anchor + uint256(pr.period) * (GRADUATION_CYCLES - 1)) revert IConfluere.InvalidParams();
+        for (uint256 i; i < GRADUATION_CYCLES; ++i) {
+            IConfluere.MarketStats storage st = s.stats[m][uint64(lastExpiry - i * pr.period)];
+            if (st.bad || st.fees < threshold) revert IConfluere.InvalidState();
+        }
+        s.graduated[m] = true;
+        emit IConfluere.PoolGraduated(m, lastExpiry);
+    }
+
     /// @notice Pay K per whole asset (rounded up) to buy back `units`. American: any time until the window ends.
     /// European: only inside the window. All of K goes to C holders; the spread share was taken at clearing.
     function repay(CoreState storage s, bytes32 poolId, uint96 units) external {

@@ -175,14 +175,7 @@ contract Confluere is IConfluere, IERC6909TokenSupply, IERC3156FlashLender, Reen
 
     /// @inheritdoc IConfluere
     function mature(bytes32 poolId) external nonReentrant {
-        PoolState storage ps = s.pool(poolId);
-        if (ps.status != Status.Open || block.timestamp < ps.key.expiry) revert InvalidState();
-        ps.status = Status.Window;
-        // one window per expiry: the first mature() of an expiry starts it, later pools join it
-        uint64 end = s.windowEnd[ps.key.expiry];
-        if (end == 0) s.windowEnd[ps.key.expiry] = end = uint64(block.number) + WINDOW_BLOCKS;
-        ps.windowEnd = end;
-        emit Matured(poolId, end);
+        WindowLogic.mature(s, _params(), poolId);
     }
 
     /// @inheritdoc IConfluere
@@ -224,32 +217,13 @@ contract Confluere is IConfluere, IERC6909TokenSupply, IERC3156FlashLender, Reen
     /// @dev Only for pools of markets that have not graduated. Blocks new orders and clearing, never cancel,
     /// repay, bids or claims. Marks the expiry as bad for graduation.
     function pause(bytes32 poolId, uint64 blocks) external {
-        PoolState storage ps = s.pool(poolId);
         if (msg.sender != guardian) revert NotOwner();
-        if (s.graduated[ps.marketId] || blocks == 0 || blocks > MAX_PAUSE_BLOCKS) revert InvalidParams();
-        uint64 until = uint64(block.number) + blocks;
-        ps.pausedUntil = until;
-        s.stats[ps.marketId][ps.key.expiry].bad = true;
-        emit Paused(poolId, until);
+        WindowLogic.pause(s, _params(), poolId, blocks);
     }
 
     /// @inheritdoc IConfluere
-    /// @dev Permissionless. A market graduates after GRADUATION_CYCLES consecutive past expiries that each reached
-    /// the per-quote treasury-fee baseline (trade fees + spread share) with no pause and no circuit breaker. Graduation is permanent.
     function graduate(address asset, address quote, Kind kind, uint64 lastExpiry) external {
-        bytes32 m = PoolKeyLib.marketId(asset, quote, kind);
-        uint256 threshold = s.graduationFee[quote];
-        GridConfig memory g = grid();
-        if (s.graduated[m] || threshold == 0 || !Grid.isOnGrid(g, lastExpiry) || lastExpiry >= block.timestamp) {
-            revert InvalidParams();
-        }
-        if (lastExpiry < g.anchor + uint256(g.period) * (GRADUATION_CYCLES - 1)) revert InvalidParams();
-        for (uint256 i; i < GRADUATION_CYCLES; ++i) {
-            MarketStats storage st = s.stats[m][uint64(lastExpiry - i * g.period)];
-            if (st.bad || st.fees < threshold) revert InvalidState();
-        }
-        s.graduated[m] = true;
-        emit PoolGraduated(m, lastExpiry);
+        WindowLogic.graduate(s, _params(), asset, quote, kind, lastExpiry);
     }
 
     // ================================================================ flash loans (ERC-3156)
@@ -437,7 +411,16 @@ contract Confluere is IConfluere, IERC6909TokenSupply, IERC3156FlashLender, Reen
     // ================================================================ internals
 
     function _params() internal view returns (Params memory) {
-        return Params(treasury, MAX_ORDERS_PER_SIDE, MAX_BIDS, WINDOW_BLOCKS, GRID_ANCHOR, GRID_BATCH);
+        return Params(
+            treasury,
+            MAX_ORDERS_PER_SIDE,
+            MAX_BIDS,
+            WINDOW_BLOCKS,
+            GRID_ANCHOR,
+            GRID_BATCH,
+            GRID_PERIOD,
+            MAX_PAUSE_BLOCKS
+        );
     }
 
     /// @dev R units locked in a pending rollover cannot move.

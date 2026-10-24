@@ -68,6 +68,8 @@ struct Params {
     uint64 windowBlocks;
     uint64 anchor; // grid anchor
     uint64 batchInterval; // base batch interval
+    uint64 period; // distance between consecutive expiries
+    uint64 maxPauseBlocks; // guardian pause budget per pool
 }
 
 /// @notice Helpers shared by the core and every logic library. Internal, so each library embeds its own copy.
