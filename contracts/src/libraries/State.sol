@@ -15,8 +15,7 @@ struct PoolState {
     bytes32 marketId;
     Status status;
     uint8 assetDecimals;
-    uint16 feeBps;
-    uint16 bandBps;
+    bool autoSell; // pool option: at close, defaulted asset is sold into the next expiry's pool of the same tier
     uint8 bandFailures;
     uint32 settleCount;
     uint64 lastSettledBatch;
@@ -25,7 +24,6 @@ struct PoolState {
     uint64 pausedBlocks; // cumulative guardian pause granted to this pool, capped at MAX_PAUSE_BLOCKS
     uint96 lastClearingPrice;
     uint96 bandBase;
-    uint8 cadence; // batch interval = base interval * {1, 12, 48}[cadence]
     uint96 minFill; // minimum fill: smallest competitive volume (asset units) a batch may trade
     uint96 firstLo; // first-auction price bounds; firstHi = 0 means no upper bound
     uint96 firstHi;
@@ -97,7 +95,7 @@ library CoreLib {
 
     /// @notice This pool's batch interval: the base interval times 1, 12 or 48 by cadence.
     function interval(PoolState storage ps, uint64 base) internal view returns (uint256) {
-        uint8 c = ps.cadence;
+        uint8 c = ps.key.cadence;
         return uint256(base) * (c == 0 ? 1 : c == 1 ? 12 : 48);
     }
 
