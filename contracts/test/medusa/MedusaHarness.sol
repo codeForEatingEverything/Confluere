@@ -250,7 +250,7 @@ contract MedusaHarness {
 
     function _escrows() internal view returns (uint256 a, uint256 q) {
         for (uint256 i; i < orderIds.length; ++i) {
-            (address owner, uint8 side, uint96 units,, uint128 escrow,,) = core.order(orderPools[i], orderIds[i]);
+            (address owner, uint8 side,, uint96 units,, uint128 escrow,,) = core.order(orderPools[i], orderIds[i]);
             if (owner == address(0)) continue;
             if (side == SELL || side == NC_SELL) a += units;
             else q += escrow;
