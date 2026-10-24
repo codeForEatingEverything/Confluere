@@ -133,7 +133,7 @@ contract AuditFindingsTest is Base {
         _buy(bob, pid, 4e16, 1000e6); // keeps the batch from crossing
         _settle(pid); // the tail (worst price, ttl 1) expires but is not at the head
         _sell(alice, pid, ONE, 2900e6); // worse than every live sell, but the tail is expired
-        (address o,,,,,,) = core.order(pid, 8);
+        (address o,,,,,,,) = core.order(pid, 8);
         assertEq(o, address(0), "expired tail evicted");
     }
 
