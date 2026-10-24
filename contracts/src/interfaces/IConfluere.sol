@@ -16,21 +16,20 @@ interface IConfluere {
         address owner;
     }
 
-    /// @notice Creator-chosen pool options (blueprint §4): batch cadence for long-tail assets, a minimum
-    /// crossing volume below which a batch does not trade (minimum fill), and price bounds for the first auction.
+    /// @notice Creator-chosen pool options (blueprint §4), not part of the pool id: a minimum crossing volume below
+    /// which a batch does not trade (minimum fill), price bounds for the first auction, and autoSell (blueprint 3.6).
+    /// Band and cadence are part of the PoolKey.
     struct PoolOptions {
-        uint8 cadence; // 0: every base interval; 1: every 12; 2: every 48 (mainnet 30 min / 6 h / 24 h)
         uint96 minFill; // asset units; a batch whose competitive volume is below this does not trade
         uint96 firstLo; // until the first trade, P* must be >= firstLo ...
         uint96 firstHi; // ... and <= firstHi (0 = no upper bound)
+        bool autoSell; // at close, sell defaulted asset into the next expiry's pool of the same tier
     }
 
     struct PoolView {
         PoolKey key;
         Status status;
         uint8 assetDecimals;
-        uint16 feeBps;
-        uint16 bandBps;
         uint8 bandFailures;
         uint32 settleCount;
         uint64 lastSettledBatch;
@@ -58,8 +57,8 @@ interface IConfluere {
         bool bad; // paused or circuit breaker tripped at this expiry
     }
 
-    event PoolCreated(bytes32 indexed poolId, PoolKey key, uint16 feeBps, uint16 bandBps, bytes32 indexed marketId);
-    event PoolOptionsSet(bytes32 indexed poolId, uint8 cadence, uint96 minFill, uint96 firstLo, uint96 firstHi);
+    event PoolCreated(bytes32 indexed poolId, PoolKey key, bytes32 indexed marketId);
+    event PoolOptionsSet(bytes32 indexed poolId, uint96 minFill, uint96 firstLo, uint96 firstHi, bool autoSell);
     event OrderPlaced(
         bytes32 indexed poolId,
         uint64 indexed orderId,
@@ -109,10 +108,7 @@ interface IConfluere {
     error Locked();
     error FlashFailed();
 
-    function createPool(PoolKey calldata key, uint16 feeBps, uint16 bandBps) external returns (bytes32 poolId);
-    function createPoolWithOptions(PoolKey calldata key, uint16 feeBps, uint16 bandBps, PoolOptions calldata opts)
-        external
-        returns (bytes32 poolId);
+    function createPool(PoolKey calldata key, PoolOptions calldata opts) external returns (bytes32 poolId);
     function placeOrder(bytes32 poolId, OrderParams calldata p) external returns (uint64 orderId);
     function placeLockedOrder(bytes32 poolId, OrderParams calldata p) external returns (uint64 orderId);
     function cancelOrder(bytes32 poolId, uint64 orderId) external;
