@@ -164,10 +164,11 @@ contract PeripheryTest is Base {
     }
 
     function test_vaultFactory() public {
-        VaultFactory f = new VaultFactory(core);
+        VaultFactory f = new VaultFactory(core, keccak256(type(Vault).creationCode));
         address[] memory as_ = new address[](1);
         as_[0] = address(weth);
         Vault v = f.create(
+            type(Vault).creationCode,
             Vault.Strategy(address(usdc), as_, Kind.American, Vault.StrikeRule.HighTier, 2500, 9900),
             "rvUSDC-ETH-High",
             "rvUSDC-ETH-High",
@@ -176,5 +177,19 @@ contract PeripheryTest is Base {
         assertEq(f.vaultsLength(), 1);
         assertEq(v.asset(), address(usdc));
         assertEq(uint8(v.strikeRule()), 1);
+    }
+
+    function test_vaultFactory_rejectsOtherCode() public {
+        VaultFactory f = new VaultFactory(core, keccak256(type(Vault).creationCode));
+        address[] memory as_ = new address[](1);
+        as_[0] = address(weth);
+        vm.expectRevert(VaultFactory.WrongVaultCode.selector);
+        f.create(
+            hex"00",
+            Vault.Strategy(address(usdc), as_, Kind.American, Vault.StrikeRule.HighTier, 2500, 9900),
+            "x",
+            "x",
+            bytes32(0)
+        );
     }
 }
