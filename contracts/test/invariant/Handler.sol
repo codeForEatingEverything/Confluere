@@ -58,6 +58,7 @@ contract Handler is Test {
         uint256 cSupply;
         uint256 rSupply;
         uint256 out; // lent + short units: the forfeiture at close swaps them for their margin
+        bool selling; // autoSell fills trade the pool's asset for quote at the clearing price (invariant 4 allows it)
     }
 
     address public constant SPECIALS = address(0x5bec1a15); // Invariants.setUp makes this the core's Specials
@@ -72,7 +73,7 @@ contract Handler is Test {
         Snap[] memory afterS = _snaps();
         for (uint256 i; i < before.length; ++i) {
             bool burned = afterS[i].cSupply < before[i].cSupply || afterS[i].rSupply < before[i].rSupply
-                || afterS[i].out < before[i].out;
+                || afterS[i].out < before[i].out || before[i].selling;
             if (!burned && afterS[i].value < before[i].value) valueExtracted = true;
         }
     }
@@ -90,6 +91,7 @@ contract Handler is Test {
         sn.cSupply = core.totalSupply(pid.cId());
         sn.rSupply = core.totalSupply(pid.rId());
         sn.out = uint256(v.lentUnits) + v.shortUnits;
+        sn.selling = v.status == Status.Selling;
     }
 
     constructor(Confluere c, MockERC20 w, MockERC20 u, address t, bytes32[] memory ps, address[] memory as_) {

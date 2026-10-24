@@ -54,7 +54,7 @@ contract InvariantsTest is Test {
         ps[0] = core.createPool(
             PoolKey(address(weth), address(usdc), ANCHOR + WEEK, 3_010_966_302, Kind.American, 800, 0),
             805,
-            IConfluere.PoolOptions(0, 0, 0, false)
+            IConfluere.PoolOptions(0, 0, 0, true) // autoSell into ps[1], the next expiry of the same tier
         );
         ps[1] = core.createPool(
             PoolKey(address(weth), address(usdc), ANCHOR + 2 * WEEK, 3_010_966_302, Kind.American, 800, 0),
@@ -185,6 +185,25 @@ contract InvariantsTest is Test {
             assertLe(v.lentUnits, v.assetBal / 2, "more than half lent");
             if (v.status == Status.Closed) assertEq(v.shortUnits + v.shortMargin, 0, "short left after close");
             assertEq(h.marginIn(pid), h.marginOut(pid) + v.lentMargin + v.shortMargin, "margin conservation");
+        }
+    }
+
+    /// @dev Invariant 3d: no stranded funds. A Selling pool's order rests in its target with exactly the units it
+    /// marks; a Closed pool has no order, no escrow, no lent or short units, and no R held by the core.
+    function invariant_noStrandedFunds() public view {
+        for (uint256 i; i < h.poolsLength(); ++i) {
+            bytes32 pid = h.pools(i);
+            IConfluere.PoolView memory v = core.pool(pid);
+            if (v.status == Status.Selling) {
+                assertGt(v.autoSellUnits, 0, "selling without units");
+                (address owner,,, uint96 units,,,,) = core.order(v.autoSellPool, v.autoSellOrder);
+                assertEq(owner, address(core), "autoSell order missing");
+                assertEq(units, v.autoSellUnits, "order units != marked units");
+            }
+            if (v.status == Status.Closed) {
+                assertEq(v.autoSellUnits + v.feeEscrow + v.shortUnits + v.shortMargin, 0, "stranded after close");
+                assertEq(core.balanceOf(address(core), pid.rId()), 0, "core R after close");
+            }
         }
     }
 
