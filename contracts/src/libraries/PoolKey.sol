@@ -7,12 +7,14 @@ enum Kind {
     European
 }
 
-/// @notice Lifecycle of a pool. Closing is the segmented abandonment-auction phase after the window ends.
+/// @notice Lifecycle of a pool. Closing is the segmented abandonment-auction phase after the window ends; Selling is
+/// the autoSell sub-state after it, while the defaulted asset rests as a sell order in the next expiry's pool.
 enum Status {
     None,
     Open,
     Window,
     Closing,
+    Selling,
     Closed
 }
 
@@ -23,6 +25,8 @@ struct PoolKey {
     uint64 expiry; // timestamp on the expiry grid
     uint128 strike; // K: quote base units per 1 whole asset (10 ** assetDecimals units)
     Kind kind;
+    uint16 bandBps; // price band of the pool: 150, 800 or 1500
+    uint8 cadence; // batch interval = base interval * {1, 12, 48}[cadence]
 }
 
 /// @notice Pool id, C-Token id and R-Token id derivation.
