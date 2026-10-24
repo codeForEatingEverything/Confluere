@@ -1,23 +1,30 @@
 /**
  * Testnet operations. Reads PRIVATE_KEY from contracts/.env (never printed).
  *   pnpm --filter @confluere/ops status
- *   pnpm --filter @confluere/ops hl-to-evm HYPE 5        # HyperCore → HyperEVM
- *   pnpm --filter @confluere/ops big-blocks on|off       # around a HyperEVM deploy
+ *   pnpm --filter @confluere/ops hl-to-evm HYPE 5        # HyperCore → HyperEVM (HyperEVM only)
+ *   pnpm --filter @confluere/ops big-blocks on|off       # around a HyperEVM deploy (HyperEVM only)
  *   pnpm --filter @confluere/ops blocktime                # 24 h block count -> WINDOW_BLOCKS (read-only)
  *   pnpm --filter @confluere/ops spot-sell HYPE 1         # HyperCore testnet: sell HYPE for USDC (IOC, 5% below mid)
  *   pnpm --filter @confluere/ops cctp 10 hyperevm monad   # move testnet USDC between chains via Circle CCTP v2
+ *   pnpm --filter @confluere/ops cctp 10 hyperevm sepolia # chains: hyperevm, monad, sepolia
  *   pnpm --filter @confluere/ops cctp-resume 0x<burnTx> hyperevm monad   # finish a CCTP transfer after its burn
  */
 import { readFileSync, existsSync } from "node:fs";
 import { createPublicClient, erc20Abi, formatEther, formatUnits, http, type Hex } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
-import { hyperEvm, hyperliquidEvmTestnet, monad, monadTestnet } from "viem/chains";
+import { hyperEvm, hyperliquidEvmTestnet, mainnet, monad, monadTestnet, sepolia } from "viem/chains";
 import { measure } from "./blocktime.js";
 import { cctp, cctpChain, relay, usdcUnits } from "./cctp.js";
 import { hlPrice, post, signL1Action, signSpotSend, systemAddress } from "./hyperliquid.js";
 
 const NET = "Testnet" as const;
 const HYPEREVM_TESTNET_USDC = "0x2b3370ee501b4a559b57d449569354196457d8ab";
+/** Tokens of the Sepolia markets (WETH / USDC, wstETH / WETH, wstETH / USDC): Circle USDC, Uniswap's WETH, Lido wstETH. */
+const SEPOLIA_TOKENS = [
+  { symbol: "USDC", address: "0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238", decimals: 6 },
+  { symbol: "WETH", address: "0xfFf9976782d46CC05630D1f6eBAb18b2324d6B14", decimals: 18 },
+  { symbol: "wstETH", address: "0xB82381A3fBD3FaFA77B3a7bE693342618240067b", decimals: 18 },
+] as const;
 
 function loadKey(): Hex {
   const f = new URL("../../../contracts/.env", import.meta.url);
@@ -32,7 +39,7 @@ function loadKey(): Hex {
 async function status() {
   const account = privateKeyToAccount(loadKey());
   console.log(`address ${account.address}`);
-  for (const chain of [monadTestnet, hyperliquidEvmTestnet]) {
+  for (const chain of [monadTestnet, hyperliquidEvmTestnet, sepolia]) {
     const c = createPublicClient({ chain, transport: http() });
     const bal = await c.getBalance({ address: account.address }).catch(() => undefined);
     console.log(`${chain.name.padEnd(26)} ${bal === undefined ? "rpc error" : `${formatEther(bal)} ${chain.nativeCurrency.symbol}`}`);
@@ -42,6 +49,11 @@ async function status() {
     .readContract({ address: HYPEREVM_TESTNET_USDC, abi: erc20Abi, functionName: "balanceOf", args: [account.address] })
     .catch(() => undefined);
   console.log(`${"HyperEVM Testnet USDC".padEnd(26)} ${usdc === undefined ? "rpc error" : formatUnits(usdc, 6)}`);
+  const sep = createPublicClient({ chain: sepolia, transport: http() });
+  for (const t of SEPOLIA_TOKENS) {
+    const b = await sep.readContract({ address: t.address, abi: erc20Abi, functionName: "balanceOf", args: [account.address] }).catch(() => undefined);
+    console.log(`${`Sepolia ${t.symbol}`.padEnd(26)} ${b === undefined ? "rpc error" : formatUnits(b, t.decimals)}`);
+  }
   const core = await post(NET, "info", { type: "spotClearinghouseState", user: account.address });
   for (const b of core.balances ?? []) console.log(`${("HyperCore " + b.coin).padEnd(26)} ${b.total}`);
   const big = await post(NET, "info", { type: "userAbstraction", user: account.address }).catch(() => undefined);
@@ -89,7 +101,7 @@ async function spotSell(coin: string, size: string) {
 }
 
 async function blocktime() {
-  for (const chain of [monad, monadTestnet, hyperEvm, hyperliquidEvmTestnet]) {
+  for (const chain of [monad, monadTestnet, hyperEvm, hyperliquidEvmTestnet, mainnet, sepolia]) {
     const m = await measure(chain).catch((e) => String(e?.shortMessage ?? e).slice(0, 80));
     if (typeof m === "string") console.log(`${chain.name.padEnd(26)} ${m}`);
     else console.log(`${chain.name.padEnd(26)} ${m.blocks} blocks in ${(m.seconds / 3600).toFixed(2)} h -> WINDOW_BLOCKS ~ ${m.window}`);
