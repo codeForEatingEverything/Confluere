@@ -2,7 +2,7 @@
  * Order math for the order form and its review (FRONTEND_DESIGN §3.1, §3.3). All bigint; the APR is the only float.
  * Prices are quote base units per one whole asset, like the contract.
  */
-import { Side, buyEscrow, impliedApr, quoteDown, repayAmount, scaleOf, spreadFee } from "@confluere/sdk";
+import { Side, buyEscrow, impliedApr, ncUnits, quoteDown, repayAmount, scaleOf, sellSplit, tradeFee } from "@confluere/sdk";
 import type { PoolRow } from "./data";
 import { isPegged } from "./markets";
 
@@ -36,11 +36,12 @@ export type OrderMath = {
   price: bigint; // the price the review assumes: the limit, or last P* for at-price orders
   estimate: boolean; // true when the review relies on last P*
   expectedUnits: bigint; // R (borrow) or C (lend) if filled
-  proceeds: bigint; // quote received by a borrower if filled (>= for limit orders)
+  proceeds: bigint; // quote received by a borrower if filled, net of fees (>= for limit orders)
   buyBack: bigint; // repayAmount(units, K)
   cost: bigint; // buy-back minus proceeds
   apr: number; // (K − price)/price annualised to expiry
-  protocolShare: bigint; // spread share inside the buy-back
+  spreadShare: bigint; // 5% of (K − price) withheld from the borrower at clearing (pool fee escrow)
+  tradeFee: bigint; // 0.015% of the notional, charged on this side at clearing
   notional: bigint; // value checked against minNotional: at K, or the budget
 };
 
@@ -53,12 +54,12 @@ export function orderMath(i: OrderInput): OrderMath {
   const orderSide = lend ? (market ? Side.NcBuy : Side.Buy) : market ? Side.NcSell : Side.Sell;
   const budget = lend && market ? i.amount : 0n;
   const units = lend && market ? 0n : i.amount;
-  const expectedUnits = lend && market ? (price > 0n ? (i.amount * scale) / price : 0n) : i.amount;
+  const expectedUnits = lend && market ? (price > 0n ? ncUnits(i.amount, price, scale) : 0n) : i.amount;
   const escrow = !lend ? i.amount : market ? i.amount : buyEscrow(i.amount, i.limit, i.ttl, scale);
-  const proceeds = price > 0n ? quoteDown(expectedUnits, price, scale) : 0n;
+  const split = price > 0n ? sellSplit(expectedUnits, price, p.strike, scale) : { gross: 0n, trade: 0n, spread: 0n, net: 0n };
+  const proceeds = split.net;
   const buyBack = repayAmount(expectedUnits, p.strike, scale);
   const cost = buyBack > proceeds ? buyBack - proceeds : 0n;
-  const vwap = price > 0n ? price : p.vwap;
   return {
     orderSide,
     units,
@@ -73,7 +74,8 @@ export function orderMath(i: OrderInput): OrderMath {
     buyBack,
     cost,
     apr: price > 0n ? impliedApr(price, p.strike, p.expiry - i.now) : 0,
-    protocolShare: spreadFee(expectedUnits, p.strike, vwap, p.feeBps, scale),
+    spreadShare: lend ? 0n : split.spread,
+    tradeFee: lend ? tradeFee(quoteDown(expectedUnits, price, scale)) : split.trade,
     notional: lend && market ? i.amount : quoteDown(i.amount, p.strike, scale),
   };
 }

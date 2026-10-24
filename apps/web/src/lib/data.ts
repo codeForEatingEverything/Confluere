@@ -30,6 +30,7 @@ import { MAX_TTL } from "./window";
 import { appFetch } from "./demo/client";
 import { useDemoClientOr } from "./demo/hooks";
 import { useViewAddress } from "./demo/hooks";
+import { feeFields, v07StatsAbi, v08Abi, type GraduationBasis } from "./v08";
 
 export const REFRESH_MS = 8000;
 
@@ -53,12 +54,14 @@ export type PoolRow = {
   kind: Kind;
   status: Status;
   assetDecimals: number;
-  feeBps: number;
+  feeBps: number; // pre-v0.8 cores only (0 on v0.8: fees are fixed, Settlement.sol)
   bandBps: number;
   bandFailures: number; // consecutive batches where at-price orders could not fill; the band widens 1.5x each
   bandBase: bigint; // centre of the at-price band
   lastClearingPrice: bigint;
-  vwap: bigint;
+  feeEscrow: bigint; // v0.8: 5% of (K − P) withheld from borrowers at clearing, split at close by repaid share
+  filledUnits: bigint; // v0.8: units ever filled in this pool (denominator of the escrow split)
+  repaidUnits: bigint; // v0.8: repaid + rolled + bid-filled units (numerator: the treasury's part)
   settleCount: number;
   windowEnd: bigint;
   pausedUntil: bigint;
@@ -168,12 +171,12 @@ export async function readPools(client: PublicClient, ids: Hex[], core?: Address
       kind: v.key.kind,
       status: v.status,
       assetDecimals: v.assetDecimals,
-      feeBps: v.feeBps,
-      bandBps: v.bandBps,
+      feeBps: Number(v.feeBps ?? 0),
+      bandBps: Number(v.bandBps ?? v.key.bandBps ?? 0),
       bandFailures: Number(v.bandFailures),
       bandBase: v.bandBase,
       lastClearingPrice: v.lastClearingPrice,
-      vwap: v.vwap,
+      ...feeFields(v),
       settleCount: v.settleCount,
       windowEnd: v.windowEnd,
       pausedUntil: v.pausedUntil,
@@ -653,9 +656,12 @@ export function usePoolSupplies(ids: Hex[]) {
   });
 }
 
-export type ExpiryStats = { expiry: number; volume: bigint; bad: boolean };
+export type ExpiryStats = { expiry: number; volume: bigint; fees: bigint; bad: boolean };
 
-/** Per-expiry market stats (graduation inputs) and the published volume threshold for the market's quote token. */
+/**
+ * Per-expiry market stats (graduation inputs) and the published threshold for the market's quote token. v0.8 cores
+ * graduate on treasury fees (`basis: "fees"`, MarketStats.fees vs graduationFee); older ones on volume.
+ */
 export function useMarketStats(market: { id: Hex; quote: Address } | undefined, expiries: number[]) {
   const { chainId, client, deployment, ready } = useChainCtx();
   return useQuery({
@@ -664,15 +670,19 @@ export function useMarketStats(market: { id: Hex; quote: Address } | undefined, 
     refetchInterval: REFRESH_MS * 4,
     queryFn: async () => {
       const core = deployment!.confluere;
+      const [fee] = await readManySafe(client!, [{ address: core, abi: v08Abi, functionName: "graduationFee", args: [market!.quote] } as const]);
+      const basis: GraduationBasis = fee === undefined ? "volume" : "fees";
       const r = await readMany(client!, [
-        { address: core, abi: confluereAbi, functionName: "graduationVolume", args: [market!.quote] } as const,
-        ...expiries.map((e) => ({ address: core, abi: confluereAbi, functionName: "marketStats", args: [market!.id, BigInt(e)] }) as const),
+        basis === "fees"
+          ? ({ address: core, abi: v08Abi, functionName: "graduationFee", args: [market!.quote] } as const)
+          : ({ address: core, abi: v08Abi, functionName: "graduationVolume", args: [market!.quote] } as const),
+        ...expiries.map((e) => ({ address: core, abi: basis === "fees" ? v08Abi : v07StatsAbi, functionName: "marketStats", args: [market!.id, BigInt(e)] }) as const),
       ]);
       const stats: ExpiryStats[] = expiries.map((expiry, i) => {
-        const st = r[i + 1] as { volume: bigint; bad: boolean };
-        return { expiry, volume: st.volume, bad: st.bad };
+        const st = r[i + 1] as { volume: bigint; fees?: bigint; bad: boolean };
+        return { expiry, volume: st.volume, fees: st.fees ?? 0n, bad: st.bad };
       });
-      return { threshold: r[0] as bigint, stats };
+      return { basis, threshold: r[0] as bigint, stats };
     },
   });
 }
