@@ -358,8 +358,10 @@ trap 'exit 130' INT TERM
 # LST_SEED_UNIT_BPS, the extra pair EXTRA_SEED_UNIT_BPS.
 # Each buy escrows exactly what the core's placeOrder pulls (OrderLogic, BUY):
 # quoteUp(units * limit) + ttl, i.e. the quote rounded up per order plus 1 wei per batch of its ttl (SEED_TTL below).
-# FUND=1 wraps the missing wrapped-native amount from the native balance (deposit()); USDC and shMON must be
-# obtained by hand (Circle faucet; FastLane deposit). GAS_RESERVE (wei, default 0.5 native) stays unwrapped for gas.
+# FUND=1 wraps the missing wrapped-native amount from the native balance (deposit()) and, where the LST mints for
+# native coin sent to it (LST_FUND=receive: wstETH on Sepolia), stakes the missing LST the same way; USDC and shMON must
+# be obtained by hand (Circle faucet; FastLane deposit). GAS_RESERVE (wei, default 0.5 native; testnet_params may set a
+# chain's own) stays unwrapped for gas.
 # Public testnet RPCs drop connections now and then (HyperEVM: "tls handshake eof"): retry a read a few times before
 # giving up, so a flaky read does not stop a deployment between steps.
 rcast() {
@@ -435,25 +437,43 @@ print("gas", int(reserve), int(gas), max(0, int(reserve) - int(gas)), "-")
 PY
   )
   echo "$plan" | awk '{printf "  %-11s need %s have %s short %s\n", $1, $2, $3, $4}'
-  local short_nat gas_have reserve
+  local short_nat avail reserve eth
   short_nat=$(echo "$plan" | awk '$1=="native"{print $4}')
-  gas_have=$(echo "$plan" | awk '$1=="gas"{print $3}')
+  avail=$(echo "$plan" | awk '$1=="gas"{print $3}') # native coin left after what FUND=1 already spent
   reserve=$(echo "$plan" | awk '$1=="gas"{print $2}')
+  # spend AMOUNT: true when the native coin left after AMOUNT still covers GAS_RESERVE (wei, beyond 64-bit shell math)
+  spend() { python3 -c "import sys; a, x, r = map(int, sys.argv[1:]); sys.exit(0 if a - x >= r else 1)" "$avail" "$1" "$reserve"; }
   local fail=0 lbl need have short addr
   while read -r lbl need have short addr; do
     [ "$short" != 0 ] || continue
     case $lbl in
       native)
-        if [ "${FUND:-0}" = 1 ] && python3 -c "import sys; sys.exit(0 if $gas_have - $short_nat >= $reserve else 1)"; then
+        if [ "${FUND:-0}" = 1 ] && spend "$short_nat"; then
           echo "  FUND=1: wrapping $short_nat wei into $NATIVE"
           cast send "$NATIVE" "deposit()" --value "$short_nat" --rpc-url "$R" "${SIGNER[@]}" >/dev/null </dev/null
+          avail=$(python3 -c "import sys; print(int(sys.argv[1]) - int(sys.argv[2]))" "$avail" "$short_nat")
         else
           echo "  short of wrapped native $NATIVE by $short_nat: cast send $NATIVE 'deposit()' --value $short_nat ..."
           echo "  (or re-run with FUND=1; it keeps GAS_RESERVE=$reserve wei of native for gas)"
           fail=1
         fi ;;
       usdc) echo "  short of USDC $USDC by $short (6 decimals): https://faucet.circle.com"; fail=1 ;;
-      lst) echo "  short of LST $LST by $short: FastLane deposit(assets, receiver), ~12.9 MON per shMON"; fail=1 ;;
+      lst)
+        # the native coin that mints `short` LST: the token's own rate, plus 1 gwei for the share rounding of staking
+        eth=""
+        if [ "${FUND:-0}" = 1 ] && [ "${LST_FUND:-}" = receive ]; then
+          eth=$(rcast call "$LST" "getStETHByWstETH(uint256)(uint256)" "$short" --rpc-url "$R" | awk '{print $1}')
+          eth=$(python3 -c "import sys; print(int(sys.argv[1]) + 10**9)" "$eth")
+        fi
+        if [ -n "$eth" ] && spend "$eth"; then
+          echo "  FUND=1: staking $eth wei into $LST for $short LST"
+          cast send "$LST" --value "$eth" --rpc-url "$R" "${SIGNER[@]}" >/dev/null </dev/null
+          avail=$(python3 -c "import sys; print(int(sys.argv[1]) - int(sys.argv[2]))" "$avail" "$eth")
+        else
+          echo "  short of LST $LST by $short: ${LST_HINT:-obtain it by hand}"
+          [ -z "$eth" ] || echo "  (FUND=1 would stake $eth wei but keeps GAS_RESERVE=$reserve wei of native for gas)"
+          fail=1
+        fi ;;
       gas) echo "  native balance below GAS_RESERVE for gas"; fail=1 ;;
       *) echo "  short of $lbl $addr by $short"; fail=1 ;;
     esac
