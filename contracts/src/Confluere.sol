@@ -327,6 +327,7 @@ contract Confluere is IConfluere, IERC6909TokenSupply, IERC3156FlashLender, Reen
         v.lastSettledBatch = ps.lastSettledBatch;
         v.windowEnd = ps.windowEnd;
         v.pausedUntil = ps.pausedUntil;
+        v.pausedBlocks = ps.pausedBlocks;
         v.lastClearingPrice = ps.lastClearingPrice;
         v.bandBase = ps.bandBase;
         v.quoteBal = ps.quoteBal;
