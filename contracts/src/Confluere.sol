@@ -332,14 +332,23 @@ contract Confluere is IConfluere, IERC6909TokenSupply, IERC3156FlashLender, Reen
     function order(bytes32 poolId, uint64 orderId)
         external
         view
-        returns (address owner, uint8 side, uint96 units, uint96 limit, uint128 escrow, uint32 deadline, uint64 next)
+        returns (
+            address owner,
+            uint8 side,
+            uint8 flags,
+            uint96 units,
+            uint96 limit,
+            uint128 escrow,
+            uint32 deadline,
+            uint64 next
+        )
     {
         Order storage o = s.orders[poolId][orderId];
-        return (o.owner, o.side, o.units, o.limit, o.escrow, o.deadline, o.next);
+        return (o.owner, o.side, o.flags, o.units, o.limit, o.escrow, o.deadline, o.next);
     }
 
-    function rolloverSource(bytes32 poolId, uint64 orderId) external view returns (bytes32) {
-        return s.rolloverOld[poolId][orderId];
+    function linkedPool(bytes32 poolId, uint64 orderId) external view returns (bytes32) {
+        return s.linkedPool[poolId][orderId];
     }
 
     function bookHead(bytes32 poolId, uint8 side) external view returns (uint64, uint32) {
