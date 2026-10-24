@@ -182,10 +182,12 @@ contract Vault is ERC20, IERC7540, ReentrancyGuardTransient {
         IConfluere.MarketStats memory st = core.marketStats(m, targetExpiry - core.grid().period);
         uint96 strike = strikeRule == StrikeRule.LowestTraded ? st.minStrike : st.maxStrike;
         if (strike == 0) return (bytes32(0), 0, 0);
-        bytes32 pid = PoolKey(token, _quote, targetExpiry, strike, kind).toId();
-        IConfluere.PoolView memory v = core.pool(pid);
-        if (v.status != Status.Open) return (bytes32(0), 0, 0);
-        return (pid, strike, v.settleCount);
+        for (uint8 c; c < 3; ++c) {
+            bytes32 pid = PoolKey(token, _quote, targetExpiry, strike, kind, 800, c).toId();
+            IConfluere.PoolView memory v = core.pool(pid);
+            if (v.status == Status.Open) return (pid, strike, v.settleCount);
+        }
+        return (bytes32(0), 0, 0);
     }
 
     /// @notice Quote the vault may still invest this epoch: idle minus queued deposits, reserved redemptions and an
