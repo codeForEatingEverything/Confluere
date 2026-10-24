@@ -41,7 +41,7 @@ contract MedusaHarness {
         weth = new MockERC20("WETH", "WETH", 18);
         usdc = new MockERC20("USDC", "USDC", 6);
         Confluere.Config memory c;
-        c.grid = GridConfig(ANCHOR, WEEK, 30 minutes, 4, 2);
+        c.grid = GridConfig(ANCHOR, WEEK, 30 minutes, 4);
         c.maxOrdersPerSide = 6;
         c.maxBids = 4;
         c.chains = new Confluere.ChainParams[](1);
@@ -56,11 +56,13 @@ contract MedusaHarness {
         weth.approve(address(core), type(uint256).max);
         usdc.approve(address(core), type(uint256).max);
         pools[0] = core.createPool(
-            PoolKey(address(weth), address(usdc), ANCHOR + WEEK, 3000e6, Kind.American, 800, 0),
+            PoolKey(address(weth), address(usdc), ANCHOR + WEEK, 3_010_966_302, Kind.American, 800, 0),
+            805,
             IConfluere.PoolOptions(0, 0, 0, false)
         );
         pools[1] = core.createPool(
-            PoolKey(address(weth), address(usdc), ANCHOR + WEEK, 3000e6, Kind.European, 150, 0),
+            PoolKey(address(weth), address(usdc), ANCHOR + WEEK, 3_010_966_302, Kind.European, 150, 0),
+            805,
             IConfluere.PoolOptions(0, 0, 0, false)
         );
         for (uint256 i; i < 3; ++i) {
