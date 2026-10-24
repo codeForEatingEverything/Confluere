@@ -50,7 +50,9 @@ trap cleanup EXIT
 # wait for this run's anvil (30 s at most); stop at once if it exited (e.g. it could not bind the port)
 for i in $(seq 1 60); do
   cast chain-id --rpc-url $R >/dev/null 2>&1 && break
-  kill -0 $ANVIL 2>/dev/null || { echo "FAIL: anvil failed to start"; exit 1; }
+  # an exited child stays a zombie until reaped and still answers kill -0, so check its state too
+  { kill -0 $ANVIL 2>/dev/null && [ "$(ps -o stat= -p $ANVIL 2>/dev/null | cut -c1)" != Z ]; } \
+    || { echo "FAIL: anvil failed to start"; exit 1; }
   [ "$i" -lt 60 ] || { echo "FAIL: anvil did not answer on 8545 within 30 s"; exit 1; }
   sleep 0.5
 done
