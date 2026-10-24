@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, fireEvent, screen, within } from "@testing-library/react";
 import { QueryClient, QueryClientProvider, useQuery } from "@tanstack/react-query";
 import { render } from "@testing-library/react";
+import { deployments } from "@confluere/sdk";
 import { DS, resetDS, switchNetwork, wrap } from "./fixtures";
 
 vi.mock("next/link", () => ({ default: ({ children, href, ...p }: any) => <a href={href} {...p}>{children}</a> }));
@@ -25,10 +26,13 @@ vi.mock("@/lib/chains", async (orig) => {
 import { AppShell, TabBar, TopBar, Footer } from "../src/components/layout/AppShell";
 import { NetworkStatus } from "../src/components/ui/NetworkStatus";
 
+const asked: string[] = [];
+
 beforeEach(() => {
   resetDS();
   switchNetwork.calls = [];
-  vi.stubGlobal("fetch", async () => ({ ok: true, json: async () => ({ status: { complete: true }, pools: [{ id: "0x1", expiry: 4_000_000_000, marketId: "0xm" }], last: {} }) }));
+  asked.length = 0;
+  vi.stubGlobal("fetch", async (u: string) => (asked.push(String(u)), { ok: true, json: async () => ({ status: { complete: true }, pools: [{ id: "0x1", expiry: 4_000_000_000, marketId: "0xm" }], last: {} }) }));
 });
 afterEach(() => {
   cleanup();
@@ -52,7 +56,7 @@ describe("top bar", () => {
     expect(within(menu).queryAllByRole("menuitemradio")).toHaveLength(0); // dark only, no theme switch
   });
 
-  it("the network menu lists both testnets with their open markets and switches without a wallet", async () => {
+  it("the network menu lists the testnets with their open markets and switches without a wallet", async () => {
     DS.connected = false;
     wrap(<TopBar />);
     fireEvent.click(screen.getAllByTestId("network-menu")[0]!);
@@ -62,7 +66,14 @@ describe("top bar", () => {
     await act(async () => {
       await new Promise((r) => setTimeout(r, 20));
     });
-    expect(within(menu).getAllByText("1 market open").length).toBe(2);
+    // every deployed network shows its open markets (the stubbed index answers one pool for any chain)
+    const sepoliaLive = !!deployments[11155111];
+    expect(within(menu).getAllByText("1 market open").length).toBe(sepoliaLive ? 3 : 2);
+    if (!sepoliaLive) {
+      // Sepolia is listed before its deploy, says so, and its (missing) index is never asked for
+      expect(within(within(menu).getByTestId("network-11155111")).getByText("Not deployed yet")).toBeTruthy();
+      expect(asked.some((u) => u.includes("chain=11155111"))).toBe(false);
+    }
     fireEvent.click(within(menu).getByTestId("network-10143"));
     expect(switchNetwork.calls).toEqual([10143]);
     expect(document.body.textContent).not.toMatch(/stake|faucet|get (test )?tokens/i);
