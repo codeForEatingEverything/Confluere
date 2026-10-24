@@ -2,7 +2,11 @@
  * Deployments the demo runs on: the live testnet deployments (same core, router, registry and token addresses, so
  * logos and token rules stay exactly the same), with what a fuller network would have on top: on HyperEVM a staked HYPE
  * market (kHYPE, made-up address) and a kHYPE / USDC market (on Monad shMON / USDC), a HYPE lending market (USDC / WHYPE) with its HYPE Lending vault and a pegged vault, an LP token per demo market, daily maturities and
- * the production repayment windows (7,200 blocks on HyperEVM, 24,000 on Monad).
+ * the production repayment windows (7,200 blocks on HyperEVM, 24,000 on Monad, 600 on Sepolia).
+ *
+ * Sepolia has no live deployment yet (deployments/sepolia.json comes with the founder's deploy), so its demo deployment
+ * uses the real Sepolia tokens (WETH, USDC, wstETH: real logos and token rules) with made-up contract addresses; once
+ * the SDK has the live deployment, the demo takes its contract addresses like on the other networks.
  */
 import { deployments, type Deployment } from "@confluere/sdk";
 import type { Address } from "viem";
@@ -31,6 +35,31 @@ export const DEMO_ADDR = {
   lpShmonMonEu10143: "0xd3a0000000000000000000000000000000000c0b",
   lpMonUsdcAm10143: "0xd3a0000000000000000000000000000000000c0c",
   lpMonUsdcEu10143: "0xd3a0000000000000000000000000000000000c0d",
+  // Sepolia: the contracts too until the live deployment exists
+  coreSepolia: "0xd3a0000000000000000000000000000000000d01",
+  routerSepolia: "0xd3a0000000000000000000000000000000000d02",
+  wrapperFactorySepolia: "0xd3a0000000000000000000000000000000000d03",
+  vaultFactorySepolia: "0xd3a0000000000000000000000000000000000d04",
+  seatRegistrySepolia: "0xd3a0000000000000000000000000000000000d05",
+  keeperReceiverSepolia: "0xd3a0000000000000000000000000000000000d06",
+  positionMarketSepolia: "0xd3a0000000000000000000000000000000000d07",
+  guardianSepolia: "0xd3a0000000000000000000000000000000000d08",
+  peggedVaultSepolia: "0xd3a0000000000000000000000000000000000b08",
+  usdLowVaultSepolia: "0xd3a0000000000000000000000000000000000b09",
+  usdHighVaultSepolia: "0xd3a0000000000000000000000000000000000b0a",
+  lpWstethWethAmSepolia: "0xd3a0000000000000000000000000000000000c0e",
+  lpWstethWethEuSepolia: "0xd3a0000000000000000000000000000000000c0f",
+  lpWethUsdcAmSepolia: "0xd3a0000000000000000000000000000000000c10",
+  lpWethUsdcEuSepolia: "0xd3a0000000000000000000000000000000000c11",
+  lpWstethUsdcAmSepolia: "0xd3a0000000000000000000000000000000000c12",
+  lpWstethUsdcEuSepolia: "0xd3a0000000000000000000000000000000000c13",
+} as const satisfies Record<string, Address>;
+
+/** The real Sepolia tokens (scripts/lib/testnet.sh): Uniswap's WETH9, Circle's USDC, Lido's wstETH. */
+export const SEPOLIA_TOKENS = {
+  weth: "0xfFf9976782d46CC05630D1f6eBAb18b2324d6B14",
+  usdc: "0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238",
+  wsteth: "0xB82381A3fBD3FaFA77B3a7bE693342618240067b",
 } as const satisfies Record<string, Address>;
 
 /** Daily maturities at 08:00 UTC, one round a minute. */
@@ -81,10 +110,51 @@ function monad(): Deployment {
   };
 }
 
+function sepolia(): Deployment {
+  const live: Deployment | undefined = deployments[11155111];
+  const d: Deployment = live ?? {
+    chainId: 11155111,
+    demo: false,
+    confluere: DEMO_ADDR.coreSepolia,
+    router: DEMO_ADDR.routerSepolia,
+    wrapperFactory: DEMO_ADDR.wrapperFactorySepolia,
+    vaultFactory: DEMO_ADDR.vaultFactorySepolia,
+    keeperReceiver: DEMO_ADDR.keeperReceiverSepolia,
+    seatRegistry: DEMO_ADDR.seatRegistrySepolia,
+    positionMarket: DEMO_ADDR.positionMarketSepolia,
+    guardian: DEMO_ADDR.guardianSepolia,
+    windowBlocks: 600,
+    grid: "daily",
+    maxExpiries: 15,
+    gridAnchor: DEMO_GRID.anchor,
+    gridPeriod: DEMO_GRID.period,
+    batchInterval: 120,
+    deployBlock: 11_900_000,
+  };
+  const { weth, usdc, wsteth } = SEPOLIA_TOKENS;
+  return {
+    ...d,
+    windowBlocks: 600,
+    gridAnchor: DEMO_GRID.anchor,
+    gridPeriod: DEMO_GRID.period,
+    batchInterval: DEMO_GRID.batchInterval,
+    pools: { expiry: DEMO_GRID.anchor, ...d.pools, lst: wsteth, native: weth, usdc, poolIds: [] },
+    vaults: { pegged: DEMO_ADDR.peggedVaultSepolia, usdLow: DEMO_ADDR.usdLowVaultSepolia, usdHigh: DEMO_ADDR.usdHighVaultSepolia },
+    seatLPTokens: {
+      [`${wsteth}-${weth}-0`]: DEMO_ADDR.lpWstethWethAmSepolia,
+      [`${wsteth}-${weth}-1`]: DEMO_ADDR.lpWstethWethEuSepolia,
+      [`${weth}-${usdc}-0`]: DEMO_ADDR.lpWethUsdcAmSepolia,
+      [`${weth}-${usdc}-1`]: DEMO_ADDR.lpWethUsdcEuSepolia,
+      [`${wsteth}-${usdc}-0`]: DEMO_ADDR.lpWstethUsdcAmSepolia,
+      [`${wsteth}-${usdc}-1`]: DEMO_ADDR.lpWstethUsdcEuSepolia,
+    },
+  };
+}
+
 let cache: Record<number, Deployment> | undefined;
 
-/** The demo deployment of a network (HyperEVM testnet and Monad testnet only). */
+/** The demo deployment of a network (HyperEVM testnet, Monad testnet and Sepolia). */
 export function demoDeploymentOf(id: number): Deployment | undefined {
-  cache ??= { 998: hyper(), 10143: monad() };
+  cache ??= { 998: hyper(), 10143: monad(), 11155111: sepolia() };
   return cache[id];
 }

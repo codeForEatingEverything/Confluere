@@ -1,6 +1,6 @@
 /**
- * The demo's sample network (IA v3.1 item 13). A small in-browser model of the Confluere contracts on HyperEVM and
- * Monad: tokens and balances, pools with their rounds, order books, buy-back rights and lender units, the repayment
+ * The demo's sample network (IA v3.1 item 13). A small in-browser model of the Confluere contracts on HyperEVM,
+ * Monad and Sepolia: tokens and balances, pools with their rounds, order books, buy-back rights and lender units, the repayment
  * window, vaults and LP seats. The demo client (lib/demo/client) answers the app's contract reads from it, and the
  * demo transaction path (lib/tx) applies each write to it after the wallet signs a plain message.
  *
@@ -53,7 +53,8 @@ const now = () => Math.floor(Date.now() / 1000);
 
 // ───────────────────────────── sample network specs ─────────────────────────────
 
-type TokenSpec = { address: Address; symbol: string; decimals: number; lst?: { native: Address; rate: number } };
+/** `lst.wsteth`: Lido's wstETH (Sepolia), read through `stEthPerToken` / `getWstETHByStETH`, not ERC-4626. */
+type TokenSpec = { address: Address; symbol: string; decimals: number; lst?: { native: Address; rate: number; wsteth?: boolean } };
 type MarketSpec = {
   asset: Address;
   quote: Address;
@@ -202,6 +203,51 @@ function specOf(chainId: number): ChainSpec | undefined {
         order: { m: 0, at: 3, s: 1, units: 20_000, below: 0.035 },
         pending: [usdc, 96.12],
         vaults: [{ v: 2, shares: 1_800, collect: 240 }, { v: 0, shares: 2_000 }],
+      },
+    };
+  }
+  if (chainId === 11155111) {
+    // Sepolia: 12 s slots; ETH near its mainnet price (Coinbase, 2026-10-23) and wstETH at Sepolia's own rate (1.0377)
+    return {
+      id: 11155111,
+      spb: 12,
+      b0: 11_746_000,
+      tokens: [
+        { address: native, symbol: "WETH", decimals: 18 },
+        { address: usdc, symbol: "USDC", decimals: 6 },
+        { address: lst, symbol: "wstETH", decimals: 18, lst: { native, rate: 1.0377, wsteth: true } },
+      ],
+      refs: {
+        "WETH/USDC": { p: 2_380, vol: 0.0055 },
+        "wstETH/WETH": { p: 1.0377, vol: 0.0002 },
+        "wstETH/USDC": { p: 2_380 * 1.0377, vol: 0.0055, product: ["wstETH/WETH", "WETH/USDC"] },
+      },
+      markets: [
+        { asset: native, quote: usdc, kind: Kind.American, band: 800, fee: 1000, graduated: true, strikes: [1_800, 2_000, 2_200], days: [1, 3, 7, 14, 28], ref: "WETH/USDC", size: [0.06, 2.2], pegged: false, activity: 1, window: 2, closed: 1, seat: 1, seatPrice: 24_000 },
+        { asset: native, quote: usdc, kind: Kind.European, band: 800, fee: 1000, graduated: true, strikes: [1_900, 2_100], days: [7, 28], ref: "WETH/USDC", size: [0.04, 1.4], pegged: false, activity: 0.7, seat: "user", seatPrice: 12_500 },
+        // the loop pair: staked ETH against its own coin (pegged), buy-back prices ~94% and ~96% of wstETH's rate
+        { asset: lst, quote: native, kind: Kind.American, band: 150, fee: 1000, graduated: true, strikes: [0.98, 1], days: [3, 7, 14, 28], ref: "wstETH/WETH", size: [0.08, 2.8], pegged: true, activity: 0.85, seat: 2, seatPrice: 7 },
+        { asset: lst, quote: native, kind: Kind.European, band: 150, fee: 1000, graduated: false, strikes: [1], days: [14], ref: "wstETH/WETH", size: [0.04, 0.8], pegged: true, activity: 0.55 },
+        // staked ETH against USDC: buy-back prices ~85% and ~89% of wstETH's value (the live strikes are 2100 and 2200)
+        { asset: lst, quote: usdc, kind: Kind.American, band: 800, fee: 1000, graduated: true, strikes: [2_100, 2_200], days: [3, 7, 14, 28], ref: "wstETH/USDC", size: [0.05, 1.8], pegged: false, activity: 0.75, seat: 4, seatPrice: 9_000 },
+        { asset: lst, quote: usdc, kind: Kind.European, band: 800, fee: 1000, graduated: true, strikes: [2_100, 2_200], days: [7, 28], ref: "wstETH/USDC", size: [0.03, 1.1], pegged: false, activity: 0.55, seat: 0, seatPrice: 5_600 },
+      ],
+      vaults: [
+        { address: d.vaults!.pegged, name: "Confluere ETH Pegged", symbol: "rvETH-Pegged", quote: native, market: 2, tier: "any", tvl: 680, apr: 0.044, strikeRule: 2 },
+        { address: d.vaults!.usdHigh!, name: "Confluere USDC High", symbol: "rvUSDC-High", quote: usdc, market: 0, tier: "high", tvl: 820_000, apr: 0.121, strikeRule: 1 },
+        { address: d.vaults!.usdLow, name: "Confluere USDC Low", symbol: "rvUSDC-Low", quote: usdc, market: 0, tier: "low", tvl: 1_950_000, apr: 0.072, strikeRule: 0 },
+      ],
+      obligation: { [lc(usdc)]: 300, [lc(native)]: 0.12 },
+      minNotional: { [lc(usdc)]: 10, [lc(native)]: 0.004 },
+      graduationVolume: { [lc(usdc)]: 25_000, [lc(native)]: 10 },
+      user: {
+        native: 2.5,
+        tokens: [[native, 1.5], [usdc, 14_000], [lst, 3]],
+        loans: [{ m: 0, at: 7, s: 1, units: 1.6 }, { m: 0, at: "window", s: 2, units: 0.55 }, { m: 2, at: 7, s: 1, units: 2.4 }],
+        lends: [{ m: 0, at: 14, s: 0, units: 4.2 }, { m: 0, at: "closed", s: 1, units: 2.6 }],
+        order: { m: 0, at: 3, s: 1, units: 1.1, below: 0.035 },
+        pending: [usdc, 118.42],
+        vaults: [{ v: 2, shares: 2_400, collect: 300 }, { v: 0, shares: 1.2 }],
       },
     };
   }
@@ -391,7 +437,7 @@ const de = <T>(s: string): T => JSON.parse(s, (_, x) => (x && typeof x === "obje
 
 /** Forget the sample network (a new demo session starts fresh). */
 export function resetDemoNetworks() {
-  for (const id of [...nets.keys(), 998, 10143]) {
+  for (const id of [...nets.keys(), 998, 10143, 11155111]) {
     try {
       globalThis.sessionStorage?.removeItem(STORE(id));
     } catch {}
@@ -1470,10 +1516,20 @@ export function readCall(chainId: number, c: Call): unknown {
       case "totalSupply":
         return 10n ** BigInt(tk.decimals + 9);
       case "convertToAssets":
-        if (tk.lst) return mulF(BigInt(args[0]), lstRate(net, tk));
+        if (tk.lst && !tk.lst.wsteth) return mulF(BigInt(args[0]), lstRate(net, tk));
         break;
       case "convertToShares":
-        if (tk.lst) return mulF(BigInt(args[0]), 1 / lstRate(net, tk));
+        if (tk.lst && !tk.lst.wsteth) return mulF(BigInt(args[0]), 1 / lstRate(net, tk));
+        break;
+      // Lido's wstETH: stETH per wstETH, and the conversions both ways (stETH counts as ETH here)
+      case "stEthPerToken":
+        if (tk.lst?.wsteth) return mulF(10n ** 18n, lstRate(net, tk));
+        break;
+      case "getStETHByWstETH":
+        if (tk.lst?.wsteth) return mulF(BigInt(args[0]), lstRate(net, tk));
+        break;
+      case "getWstETHByStETH":
+        if (tk.lst?.wsteth) return mulF(BigInt(args[0]), 1 / lstRate(net, tk));
         break;
     }
   }
@@ -1507,6 +1563,14 @@ export function spotPxRaw(chainId: number, spotIndex: number): B {
   advance(net);
   const p = net.st.refs["WHYPE/USDC"] ?? 0;
   return BigInt(Math.round(p * 1e6));
+}
+
+/** Mainnet-style spot for an "ETH_USD" symbol (Sepolia's reference, /api/ref/spot, display only). */
+export function spotMid(symbol: string): number | null {
+  const net = demoNet(11155111);
+  if (!net || symbol !== "ETH_USD") return null;
+  advance(net);
+  return net.st.refs["WETH/USDC"] ?? null;
 }
 
 /** Kuru-style mid for a "MON_USDC" symbol (Monad's reference, display only). */
