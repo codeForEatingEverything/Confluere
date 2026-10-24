@@ -371,6 +371,9 @@ contract Confluere is IConfluere, IERC6909TokenSupply, IERC3156FlashLender, Reen
         v.lentMargin = ps.lentMargin;
         v.shortUnits = ps.shortUnits;
         v.shortMargin = ps.shortMargin;
+        v.autoSellPool = ps.autoSellPool;
+        v.autoSellOrder = ps.autoSellOrder;
+        v.autoSellUnits = ps.autoSellUnits;
         v.options = PoolOptions(ps.minFill, ps.firstLo, ps.firstHi, ps.autoSell);
         v.batchInterval = uint64(ps.interval(GRID_BATCH));
     }
