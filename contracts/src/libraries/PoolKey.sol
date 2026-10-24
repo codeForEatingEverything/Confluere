@@ -44,6 +44,11 @@ library PoolKeyLib {
         return uint256(poolId) | 1;
     }
 
+    /// @notice A tier of a market at one expiry: strike, band and cadence packed into one key.
+    function tierKey(uint256 strike, uint16 bandBps, uint8 cadence) internal pure returns (uint256) {
+        return strike | uint256(bandBps) << 128 | uint256(cadence) << 144;
+    }
+
     /// @notice A market groups every strike and expiry of one asset pair and kind. Graduation is tracked per market.
     function marketId(address asset, address quote, Kind kind) internal pure returns (bytes32) {
         return keccak256(abi.encode(asset, quote, kind));
