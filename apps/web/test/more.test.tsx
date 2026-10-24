@@ -97,11 +97,11 @@ describe("markets pro view", () => {
 });
 
 describe("create market", () => {
-  it("one card: collateral and loan asset, repayment, maturity, buy-back price with the grid check, fee and price range; the button names the next step", () => {
+  it("one card: collateral and loan asset, repayment, maturity, buy-back price with the grid check, fixed fees, auto-sell and price range; the button names the next step", () => {
     wrap(<CreateMarketCard />);
-    for (const t of ["Collateral asset", "Loan asset", "Repayment", "Fee", "Market-order price range"]) expect(screen.getAllByText(t).length).toBeGreaterThan(0);
+    for (const t of ["Collateral asset", "Loan asset", "Repayment", "Auto-sell defaulted collateral", "Market-order price range"]) expect(screen.getAllByText(t).length).toBeGreaterThan(0);
     expect(screen.getByRole("button", { name: "Select both assets" })).toBeTruthy();
-    expect(screen.getByText(/One market per set of settings; the first creator sets the fee and the market-order price range\./)).toBeTruthy();
+    expect(screen.getByText(/One market per set of settings; the first creator sets the market-order price range and auto-sell\./)).toBeTruthy();
     expect(document.body.textContent).not.toMatch(/strike|band|cadence|batch/i);
   });
 });
