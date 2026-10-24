@@ -4,6 +4,7 @@ pragma solidity 0.8.37;
 import {Script, console2} from "forge-std/Script.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {Confluere} from "../src/Confluere.sol";
+import {IConfluere} from "../src/interfaces/IConfluere.sol";
 import {PoolKey, PoolKeyLib, Kind, Status} from "../src/libraries/PoolKey.sol";
 import {GridConfig} from "../src/libraries/Grid.sol";
 import {MockERC20} from "../src/mocks/MockERC20.sol";
@@ -170,9 +171,11 @@ contract CreatePools is Script {
         for (uint256 s; s < 2; ++s) {
             if (s == 1 && pair.strikes[1] == pair.strikes[0]) break; // single strike
             for (uint256 k; k < 2; ++k) {
-                PoolKey memory key = PoolKey(pair.asset, pair.quote, expiry, pair.strikes[s], Kind(k));
+                PoolKey memory key = PoolKey(pair.asset, pair.quote, expiry, pair.strikes[s], Kind(k), band, 0);
                 bytes32 id = PoolKeyLib.toId(key);
-                if (core.pool(id).status == Status.None) id = core.createPool(key, 1000, band);
+                if (core.pool(id).status == Status.None) {
+                    id = core.createPool(key, IConfluere.PoolOptions(0, 0, 0, true));
+                }
                 ids[n++] = id;
             }
         }
