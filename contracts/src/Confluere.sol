@@ -389,6 +389,10 @@ contract Confluere is IConfluere, IERC6909TokenSupply, IERC3156FlashLender, Reen
         return s.stats[marketId][expiry];
     }
 
+    function tierVolume(bytes32 marketId, uint64 expiry, uint256 tierKey) external view returns (uint256) {
+        return s.tierVolume[marketId][expiry][tierKey];
+    }
+
     function pending(address token, address account) external view returns (uint256) {
         return s.pending[token][account];
     }
