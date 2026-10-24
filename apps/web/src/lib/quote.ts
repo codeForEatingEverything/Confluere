@@ -86,6 +86,10 @@ export function borrowQuote(i: { pool: PoolRow; units: bigint; ref?: bigint; now
   };
 }
 
+/** What a borrower keeps from `units` sold at `price`, net of the trade fee and the 5% spread share (0 when unpriced). */
+export const netAtPrice = (p: Pick<PoolRow, "strike" | "assetDecimals">, units: bigint, price: bigint): bigint =>
+  price > 0n ? sellSplit(units, price, p.strike, scaleOf(p.assetDecimals)).net : 0n;
+
 export type LendQuote = {
   price: bigint;
   estimate: boolean;

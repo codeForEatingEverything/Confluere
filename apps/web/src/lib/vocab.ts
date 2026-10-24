@@ -57,8 +57,8 @@ export function vaultSentences(v: Pick<VaultRow, "strikeRule" | "capBps">, quote
   const cap = `${(v.capBps / 100).toLocaleString("en-US", { maximumFractionDigits: 2 })}%`;
   return [
     `This vault lends ${quote} to borrowers who sold ${asset} into the market. It never buys or holds ${asset} on purpose.`,
-    `If a borrower doesn't repay, the vault receives their ${asset}. When you withdraw, you may get some ${asset} along with ${quote}.`,
-    `Rule, fixed at deployment: lend at the ${vaultLevel(v)} buy-back price, at most ${cap} of idle funds each round, only into established markets. Nobody can change it.`,
+    `If a borrower doesn't repay, their ${asset} is sold into the next maturity and the vault gets ${quote} back. You always withdraw in ${quote} only.`,
+    `Rule, fixed at deployment: lend at the ${vaultLevel(v)} buy-back price, at most ${cap} of idle funds each round, only into established markets that sell unrepaid collateral. Nobody can change it.`,
   ];
 }
 
@@ -108,7 +108,7 @@ export function vaultExplainer(v: Pick<VaultRow, "strikeRule" | "capBps">, quote
  * C (id = poolId, the lender's side) and R (id = poolId | 1, the borrower's buy-back right); the screen never does.
  *
  * Named after the blueprint's C-Token and R-Token:
- * - C, "Lender token": pays the buy-back price (less the protocol's share of the interest) at maturity if the
+ * - C, "Lender token": pays the buy-back price at maturity if the
  *   borrower buys back, otherwise 1 unit of collateral. C matures.
  * - R, "Buy-back right": buys 1 unit of collateral for the buy-back price until the repayment window ends, worth
  *   nothing after. R expires.
