@@ -50,6 +50,9 @@ interface IConfluere {
         uint128 lentMargin;
         uint128 shortUnits;
         uint128 shortMargin;
+        bytes32 autoSellPool;
+        uint64 autoSellOrder;
+        uint96 autoSellUnits;
         PoolOptions options;
         uint64 batchInterval;
     }
@@ -102,6 +105,13 @@ interface IConfluere {
     event Lent(bytes32 indexed poolId, address indexed to, uint256 units, uint256 margin, uint256 fee);
     event LentReturned(bytes32 indexed poolId, uint256 units, uint256 marginOut, address marginTo);
     event LentToppedUp(bytes32 indexed poolId, uint256 amount);
+    /// @dev A closed autoSell pool offered its defaulted asset in the next expiry's pool of the same tier; the pool
+    /// stays Selling (claims wait) until the order leaves the book (AutoSellEnded, then WindowClosed).
+    event AutoSellPlaced(
+        bytes32 indexed poolId, bytes32 indexed targetPoolId, uint64 orderId, uint256 units, uint256 limit
+    );
+    /// @dev unitsLeft stay in the pool and are claimed in kind; units sold and their proceeds are in OrderFilled.
+    event AutoSellEnded(bytes32 indexed poolId, uint256 unitsLeft);
     event ShortRecorded(bytes32 indexed poolId, uint256 shortUnits, uint256 shortMargin);
     event FeeEscrowSplit(
         bytes32 indexed poolId, uint256 toTreasury, uint256 toLenders, uint256 repaidUnits, uint256 filledUnits
