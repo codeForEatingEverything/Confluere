@@ -20,9 +20,9 @@ abstract contract VaultBase is Base {
     function _config() internal view override returns (Confluere.Config memory c) {
         c = super._config();
         c.chains[0].graduationQuotes = new address[](1);
-        c.chains[0].graduationVolumes = new uint256[](1);
+        c.chains[0].graduationFees = new uint256[](1);
         c.chains[0].graduationQuotes[0] = address(usdc);
-        c.chains[0].graduationVolumes[0] = 1000e6;
+        c.chains[0].graduationFees[0] = 0.8e6; // trade fees of one 1-ETH fill at 2900: 2 x 0.435 USDC
     }
 
     function setUp() public override {
@@ -154,9 +154,9 @@ contract VaultTest is VaultBase {
         vault.roll();
         (uint256 nav, uint256 supply,) = vault.epochs(2);
         assertEq(supply, 10_000e6 * 1e6);
-        // interest: c units bought at 2900 return 2990 net of the 10% spread share
-        uint256 expected = 10_000e6 + c * 90e6 / ONE;
-        assertApproxEqAbs(nav, expected, 2);
+        // interest: c units bought at 2900 (plus the 0.015% buyer trade fee) return all of K = 3000
+        uint256 expected = 10_000e6 + c * 100e6 / ONE - (c * 2900e6 / ONE) * 150 / 1e6;
+        assertApproxEqAbs(nav, expected, 10);
 
         // lp2 enters at the new price, so gets fewer shares than assets
         vm.prank(lp2);
@@ -173,7 +173,7 @@ contract VaultTest is VaultBase {
         vm.prank(lp1);
         uint256 out = vault.redeem(s1, lp1, lp1);
         assertEq(usdc.balanceOf(lp1) - before, out);
-        assertApproxEqAbs(out, expected, 3);
+        assertApproxEqAbs(out, expected, 11);
     }
 
     function test_default_distributesAssets() public {

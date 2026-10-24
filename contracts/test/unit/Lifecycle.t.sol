@@ -12,9 +12,9 @@ contract LifecycleTest is Base {
     function _config() internal view override returns (Confluere.Config memory c) {
         c = super._config();
         c.chains[0].graduationQuotes = new address[](1);
-        c.chains[0].graduationVolumes = new uint256[](1);
+        c.chains[0].graduationFees = new uint256[](1);
         c.chains[0].graduationQuotes[0] = address(usdc);
-        c.chains[0].graduationVolumes[0] = 1000e6;
+        c.chains[0].graduationFees[0] = 0.8e6; // trade fees of one 1-ETH fill at 2900: 2 x 0.435 USDC
     }
 
     // ------------------------------------------------------------ rollover
@@ -63,10 +63,13 @@ contract LifecycleTest is Base {
         assertEq(core.lockedR(alice, p1), 0);
         IConfluere.PoolView memory v1 = core.pool(p1);
         assertEq(v1.assetBal, 0);
-        assertEq(v1.quoteBal, 2990e6, "K less 10% spread share");
+        assertEq(v1.quoteBal, 3000e6, "all of K; the old pool counts the units as repaid");
+        assertEq(v1.repaidUnits, ONE);
         assertEq(core.pool(p2).assetBal, ONE);
-        assertEq(_pend(address(usdc), treasury), 10e6);
-        assertEq(_pend(address(usdc), alice), 2900e6 + 100e6, "first borrow + unused top-up");
+        assertEq(core.pool(p2).feeEscrow, 5e6, "new pool's spread share at its own P*");
+        assertEq(_pend(address(usdc), treasury), 4 * 435_000, "trade fees, both pools, both sides");
+        // net per fill at 2900 = 2900 - 0.435 trade fee - 5 spread share; top-up = 3000 - 2894.565
+        assertEq(_pend(address(usdc), alice), 2894.565e6 + (200e6 - 105.435e6), "first borrow + unused top-up");
     }
 
     function test_rollover_needsEnoughTopUp() public {
@@ -118,7 +121,7 @@ contract LifecycleTest is Base {
         uint256 amount = 1000e6;
         core.flashLoan(fb, address(usdc), amount, "");
         assertEq(fb.seen(), amount + 1e6);
-        assertEq(_pend(address(usdc), treasury), 500_000, "0.05%");
+        assertEq(_pend(address(usdc), treasury), 500_000 + 2 * 435_000, "0.05% on top of the trade fees");
     }
 
     function test_flashLoan_mustRepay() public {
@@ -204,7 +207,7 @@ contract LifecycleTest is Base {
         core.graduate(address(weth), address(usdc), Kind.American, ANCHOR + 4 * WEEK);
     }
 
-    function test_graduation_needsVolume() public {
+    function test_graduation_needsFees() public {
         for (uint64 i = 1; i <= 4; ++i) {
             uint64 e = ANCHOR + i * WEEK;
             vm.warp(e - 3 days);

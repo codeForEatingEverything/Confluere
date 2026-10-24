@@ -137,7 +137,7 @@ contract PeripheryTest is Base {
         (address o1,,,, uint128 esc,,) = core.order(pid, ids[1]);
         assertEq(o0, dave);
         assertEq(o1, dave);
-        assertEq(esc, 2000e6 + 3);
+        assertEq(esc, 2000e6 + 300_000 + 6);
         assertEq(usdc.balanceOf(address(r)), 0);
     }
 
@@ -160,7 +160,7 @@ contract PeripheryTest is Base {
         uint256 u0 = usdc.balanceOf(bob);
         r.claimMany(pids);
         vm.stopPrank();
-        assertEq(usdc.balanceOf(bob) - u0, 2990e6);
+        assertEq(usdc.balanceOf(bob) - u0, 3000e6);
     }
 
     function test_vaultFactory() public {

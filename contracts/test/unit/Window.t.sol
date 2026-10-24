@@ -15,7 +15,9 @@ contract WindowTest is Base {
         _buy(bob, pid, ONE, 2900e6);
         _buy(carol, pid, ONE, 2900e6);
         _settle(pid);
-        assertEq(core.pool(pid).vwap, 2900e6);
+        assertEq(core.pool(pid).filledUnits, 2 * ONE);
+        // 5% of (K - P*) per unit sits in the escrow until close
+        assertEq(core.pool(pid).feeEscrow, 10e6);
     }
 
     function test_american_repayAnytime_withSpreadShare() public {
@@ -26,9 +28,10 @@ contract WindowTest is Base {
         core.repay(pid, uint96(ONE));
         assertEq(weth.balanceOf(alice), w0 + ONE, "asset back");
         assertEq(u0 - usdc.balanceOf(alice), 3000e6, "paid K");
-        // fee = 10% of (K - vwap) = 10e6
-        assertEq(_pend(address(usdc), treasury), 10e6);
-        assertEq(core.pool(pid).quoteBal, 2990e6);
+        // repay carries no fee: all of K goes to C holders; treasury holds only the four trade fees (0.015% each)
+        assertEq(_pend(address(usdc), treasury), 4 * 435_000);
+        assertEq(core.pool(pid).quoteBal, 3000e6);
+        assertEq(core.pool(pid).repaidUnits, ONE);
         assertEq(core.balanceOf(alice, _r(pid)), 0);
     }
 
@@ -83,11 +86,11 @@ contract WindowTest is Base {
         vm.prank(bob);
         (uint256 q, uint256 a) = core.claim(pid);
         assertEq(a, 0);
-        assertEq(q, 2990e6, "K minus spread share");
+        assertEq(q, 3000e6, "all of K; the spread share was taken from the borrowers at clearing");
         assertEq(usdc.balanceOf(bob), u0 + q);
         vm.prank(carol);
         (q,) = core.claim(pid);
-        assertEq(q, 2990e6);
+        assertEq(q, 3000e6);
         assertEq(core.pool(pid).quoteBal, 0);
     }
 
@@ -97,9 +100,9 @@ contract WindowTest is Base {
         core.closeWindow(pid, 10);
         vm.prank(bob);
         (uint256 q, uint256 a) = core.claim(pid);
-        assertEq(q, 0);
+        assertEq(q, 5e6, "defaulted part of the spread escrow goes to C holders");
         assertEq(a, ONE, "physical delivery");
-        assertEq(_pend(address(usdc), treasury), 0, "no fee on default");
+        assertEq(_pend(address(usdc), treasury), 4 * 435_000, "only trade fees on default");
     }
 
     function test_abandonmentAuction_surplusToRHolders() public {
@@ -134,7 +137,7 @@ contract WindowTest is Base {
         // lenders split: alice repaid 2990 net + eve paid 3000
         vm.prank(bob);
         (q,) = core.claim(pid);
-        assertEq(q, 2995e6);
+        assertEq(q, 3000e6);
     }
 
     function test_bid_cancellableOnlyInWindow() public {
@@ -199,7 +202,7 @@ contract WindowTest is Base {
         core.closeWindow(pid, 10);
         vm.prank(bob);
         (uint256 q, uint256 a) = core.claim(pid);
-        assertEq(q, 1495e6);
+        assertEq(q, 1502.5e6); // K/2 + half of the defaulted half of the escrow
         assertEq(a, 5e17);
         assertEq(core.balanceOf(bob, _c(pid)), 0);
         // transferred C claims the same
@@ -207,7 +210,7 @@ contract WindowTest is Base {
         core.transfer(eve, _c(pid), ONE);
         vm.prank(eve);
         (q, a) = core.claim(pid);
-        assertEq(q, 1495e6);
+        assertEq(q, 1502.5e6); // K/2 + half of the defaulted half of the escrow
         assertEq(a, 5e17);
     }
 

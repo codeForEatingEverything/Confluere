@@ -118,10 +118,10 @@ contract SeatsTest is Base {
         _buy(bob, pid, ONE, 2900e6);
         _settle(pid);
         vm.prank(dave);
-        core.repay(pid, uint96(ONE)); // fee = 10% of (3000 - 2900) = 10 USDC
-        assertEq(core.marketFees(market), 10e6);
+        core.repay(pid, uint96(ONE)); // no fee on repay; the spread share waits in the escrow until close
+        assertEq(core.marketFees(market), 2 * 435_000, "trade fees, 0.015% each side");
         reg.split(address(weth), address(usdc), Kind.American);
-        assertEq(reg.claimable(address(usdc), alice), 3.5e6, "35% to the seat");
+        assertEq(reg.claimable(address(usdc), alice), 304_500, "35% to the seat");
         uint256 protocolBefore = reg.claimable(address(usdc), protocolMs);
         reg.split(address(weth), address(usdc), Kind.American); // idempotent
         assertEq(reg.claimable(address(usdc), protocolMs), protocolBefore);
@@ -129,7 +129,7 @@ contract SeatsTest is Base {
         uint256 a0 = usdc.balanceOf(alice);
         vm.prank(alice);
         reg.withdraw(address(usdc)); // pulls the fees out of the core
-        assertEq(usdc.balanceOf(alice) - a0, 3.5e6);
+        assertEq(usdc.balanceOf(alice) - a0, 304_500);
         _assertSolvent();
     }
 

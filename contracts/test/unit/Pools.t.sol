@@ -73,7 +73,9 @@ contract PoolsTest is Base {
         assertEq(weth.balanceOf(alice), w0 - ONE);
         uint256 u0 = usdc.balanceOf(bob);
         _buy(bob, pid, ONE, 2900e6);
-        assertEq(u0 - usdc.balanceOf(bob), 2900e6 + 10, "limit cost plus 1 wei per ttl batch");
+        assertEq(
+            u0 - usdc.balanceOf(bob), 2900e6 + 435_000 + 20, "limit cost, its 0.015% trade fee, 2 wei per ttl batch"
+        );
     }
 
     function test_placeOrder_validation() public {
@@ -192,7 +194,7 @@ contract PoolsTest is Base {
         vm.prank(bob);
         core.cancelOrder(pid, b);
         assertEq(_pend(address(weth), alice), ONE);
-        assertEq(_pend(address(usdc), bob), 2800e6 + 10);
+        assertEq(_pend(address(usdc), bob), 2800e6 + 420_000 + 20);
         uint256 before = weth.balanceOf(alice);
         vm.prank(alice);
         core.withdraw(address(weth), alice);

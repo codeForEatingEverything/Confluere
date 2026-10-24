@@ -31,10 +31,14 @@ contract ClearingTest is Base {
         assertEq(v.lastClearingPrice, 2900e6, "P* = midpoint");
         assertEq(core.balanceOf(alice, _r(pid)), ONE, "R to borrower");
         assertEq(core.balanceOf(bob, _c(pid)), ONE, "C to lender");
-        assertEq(_pend(address(usdc), alice), 2900e6, "borrower receives P*");
-        assertEq(_pend(address(usdc), bob), 50e6 + 10, "lender refunded limit - P* and rounding reserve");
+        // seller: P* less 0.015% trade fee (435,000) and 5% of K - P* (5e6) into the pool's spread escrow
+        assertEq(_pend(address(usdc), alice), 2900e6 - 435_000 - 5e6, "borrower receives P* net of fees");
+        // escrow 2950 + 0.015% + 2 wei x ttl 10; paid 2900 + 0.015%
+        assertEq(_pend(address(usdc), bob), 50e6 + 7500 + 20, "lender refunded limit - P*, fee difference, reserve");
+        assertEq(v.feeEscrow, 5e6);
+        assertEq(_pend(address(usdc), treasury), 2 * 435_000, "trade fee from each side");
         assertEq(v.assetBal, ONE);
-        assertEq(v.vwap, 2900e6);
+        assertEq(v.filledUnits, ONE);
     }
 
     function test_multiOrder_partialMarginal() public {
@@ -60,8 +64,8 @@ contract ClearingTest is Base {
         (address yo,,,,,,) = core.order(pid, y);
         assertEq(yo, carol, "unfilled stays");
         // every filled seller got at least its limit, every filled buyer paid at most its limit
-        assertEq(_pend(address(usdc), alice), 2950e6);
-        assertEq(_pend(address(usdc), dave), 1475e6);
+        assertEq(_pend(address(usdc), alice), 2950e6 - 442_500 - 2.5e6, "P* net of trade fee and spread share");
+        assertEq(_pend(address(usdc), dave), 1475e6 - 221_250 - 1.25e6);
     }
 
     function test_noCross_noFill() public {
@@ -116,7 +120,7 @@ contract ClearingTest is Base {
         (,, uint96 units,, uint128 esc, uint32 deadline,) = core.order(pid, x);
         assertEq(units, ONE);
         uint256 left = deadline - core.pool(pid).settleCount;
-        assertEq(esc, 2900e6 + left, "remaining escrow = remainder at limit + reserve");
+        assertEq(esc, 2900e6 + 435_000 + 2 * left, "remaining escrow = remainder at limit + fee + reserve");
     }
 
     // ------------------------------------------------------------ non-competitive orders and band
@@ -147,16 +151,20 @@ contract ClearingTest is Base {
         assertEq(core.balanceOf(dave, _r(pid)), 3 * ONE, "leftover seller served the nc buyer");
     }
 
-    function test_nc_sellVsNcBuy() public {
+    /// NC buy demand enters the price ahead of competitive buys (capped at 50% of q0), so it takes the competitive
+    /// sells first and uses up the cap; the NC sell has no room left this batch.
+    function test_nc_buyPricedInBeforeNcSell() public {
         _seedPrice(2900e6);
         _sell(alice, pid, 2 * ONE, 2900e6);
         _buy(bob, pid, 2 * ONE, 2900e6);
         _order(dave, pid, NC_SELL, ONE, 0, 0, 10);
         _order(carol, pid, NC_BUY, 0, 0, 100_000e6, 10);
         _settle(pid);
-        assertEq(core.balanceOf(dave, _r(pid)), ONE);
+        assertEq(core.pool(pid).lastClearingPrice, 2900e6);
+        assertEq(core.balanceOf(alice, _r(pid)), 2 * ONE);
         assertEq(core.balanceOf(carol, _c(pid)), ONE);
-        assertEq(_pend(address(usdc), dave), 2900e6);
+        assertEq(core.balanceOf(bob, _c(pid)), ONE);
+        assertEq(core.balanceOf(dave, _r(pid)), 0);
     }
 
     function test_band_outOfBand_rollsNc_andBreaker() public {
