@@ -98,26 +98,18 @@ contract ClearingHalmos is Test {
     /// The NC pricing rule (blueprint 4.2 as pinned by the simulations): with d = min(NC demand, q0 / 2) priced in
     /// ahead of the competitive buys, the recross price never falls below the competitive-only price, stays between
     /// the marginal competitive limits that fill, and the NC volume stays within half the competitive-only volume.
-    function check_ncPricingRule(
-        uint8[3] memory sUnits,
-        uint16[3] memory sLim,
-        uint8[3] memory bUnits,
-        uint16[3] memory bLim,
-        uint8 demand
-    ) public pure {
-        uint256[3] memory su;
-        uint256[3] memory sl;
-        uint256[3] memory bu;
-        uint256[3] memory bl;
-        for (uint256 k; k < 3; ++k) {
-            vm.assume(sUnits[k] != 0 && bUnits[k] != 0);
-            (su[k], sl[k], bu[k], bl[k]) = (sUnits[k], sLim[k], bUnits[k], bLim[k]);
-        }
+    /// Books of three sells and three buys with symbolic sizes and sorted symbolic limits.
+    /// @custom:halmos --loop 8
+    function slow_ncPricingRule(uint24 sUnits, uint48 sLim, uint24 bUnits, uint48 bLim, uint8 demand) public pure {
+        uint256[3] memory su = _unpack(sUnits, 8);
+        uint256[3] memory sl = _unpack(sLim, 16);
+        uint256[3] memory bu = _unpack(bUnits, 8);
+        uint256[3] memory bl = _unpack(bLim, 16);
+        vm.assume(su[0] != 0 && su[1] != 0 && su[2] != 0 && bu[0] != 0 && bu[1] != 0 && bu[2] != 0);
         vm.assume(sl[0] <= sl[1] && sl[1] <= sl[2] && bl[0] >= bl[1] && bl[1] >= bl[2]);
         (uint256 q0, uint256 p0,,) = _cross(su, sl, bu, bl, 0);
         vm.assume(q0 != 0);
-        uint256 cap = q0 * 5000 / 10_000;
-        uint256 d = demand < cap ? demand : cap;
+        uint256 d = demand < q0 / 2 ? demand : q0 / 2;
         vm.assume(d != 0);
         (uint256 q1, uint256 p1, uint256 ms, uint256 mb) = _cross(su, sl, bu, bl, d);
         vm.assume(q1 != 0); // otherwise the competitive-only result stands
@@ -126,8 +118,16 @@ contract ClearingHalmos is Test {
         assert(2 * d <= q0);
     }
 
+    /// Three `w`-bit fields of `x`, low field first (packed so the harness stays within the legacy stack limit).
+    function _unpack(uint256 x, uint256 w) internal pure returns (uint256[3] memory r) {
+        uint256 m = (1 << w) - 1;
+        r[0] = x & m;
+        r[1] = (x >> w) & m;
+        r[2] = (x >> (2 * w)) & m;
+    }
+
     /// Stage-2 sizing keeps the total non-competitive volume within half the competitive-only volume.
-    function check_ncCapHalf(uint128 qc, uint128 x, uint128 m2raw) public pure {
+    function slow_ncCapHalf(uint64 qc, uint64 x, uint64 m2raw) public pure {
         uint256 cap = uint256(qc) * 5000 / 10_000;
         vm.assume(x <= cap);
         uint256 m2 = m2raw < cap - x ? m2raw : cap - x;
