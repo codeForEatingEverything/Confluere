@@ -54,5 +54,6 @@ describe("time and blocks", () => {
     expect(pct(0.0333)).toBe("3.33%");
     expect(vaultDisplayName("rvNATIVE-Pegged", 10143)).toBe("rvMON-Pegged");
     expect(vaultDisplayName("rvUSD-NATIVE-Low", 998)).toBe("rvUSD-HYPE-Low");
+    expect(vaultDisplayName("rvNATIVE-Pegged", 11155111)).toBe("rvETH-Pegged");
   });
 });

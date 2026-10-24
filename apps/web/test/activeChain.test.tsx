@@ -16,6 +16,7 @@ vi.mock("wagmi", () => ({
 
 const { ActiveChainProvider, setChainChoice, useActiveChain, useSwitchNetwork } = await import("../src/lib/activeChain");
 const config = await import("../src/lib/config");
+const { deployments } = await import("@confluere/sdk");
 
 beforeEach(() => {
   wallet.isConnected = false;
@@ -61,6 +62,28 @@ describe("useActiveChain", () => {
     expect(replaced.some((u) => u.includes("chain=monad"))).toBe(true);
   });
 
+  it("a wallet that connects on Sepolia is followed like the other served networks, deployed or not", async () => {
+    wallet.isConnected = true;
+    wallet.chainId = 11155111;
+    let v: ReturnType<typeof useActiveChain> | undefined;
+    const Probe = () => {
+      v = useActiveChain();
+      return null;
+    };
+    await act(async () => {
+      render(
+        <ActiveChainProvider>
+          <Probe />
+        </ActiveChainProvider>,
+      );
+    });
+    expect(v?.chainId).toBe(11155111);
+    expect(v?.meta.native).toBe("ETH");
+    expect(v?.walletOnOtherChain).toBe(false);
+    expect(switchChain).not.toHaveBeenCalled();
+    expect(replaced.some((u) => u.includes("chain=sepolia"))).toBe(true);
+  });
+
   it("a wallet on a foreign chain leaves the app on the stored choice and flags it", () => {
     wallet.isConnected = true;
     wallet.chainId = 1;
@@ -87,6 +110,11 @@ describe("useSwitchNetwork", () => {
       expect(await result.current.sw.switchNetwork(10143)).toEqual({ ok: true });
     });
     expect(result.current.active.chainId).toBe(10143);
+    await act(async () => {
+      expect(await result.current.sw.switchNetwork(11155111)).toEqual({ ok: true });
+    });
+    expect(result.current.active.chainId).toBe(11155111);
+    expect(result.current.active.deployment).toBe(deployments[11155111]); // undefined until deployments/sepolia.json exists
     expect(switchChain).not.toHaveBeenCalled();
   });
 
