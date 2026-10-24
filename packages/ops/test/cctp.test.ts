@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { awaitAttestation, cctpChain, relay, resumeCommand, usdcUnits } from "../src/cctp";
+import { awaitAttestation, CCTP_CHAINS, cctpChain, relay, resumeCommand, usdcUnits } from "../src/cctp";
 
 const BURN = `0x${"ab".repeat(32)}` as const;
 // anvil key 0: test-only
@@ -33,6 +33,14 @@ describe("cctp", () => {
     expect(cctpChain("hyperevm", "monad")).toBe("hyperevm");
     expect(() => cctpChain("hyperliquid", "monad")).toThrow(/unknown chain hyperliquid/);
     for (const inherited of ["toString", "constructor", "__proto__", "hasOwnProperty"]) expect(() => cctpChain(inherited, "monad")).toThrow(/unknown chain/);
+  });
+  it("knows Ethereum Sepolia as CCTP domain 0 with Circle's USDC", () => {
+    expect(cctpChain("sepolia", "monad")).toBe("sepolia");
+    expect(CCTP_CHAINS.sepolia.domain).toBe(0);
+    expect(CCTP_CHAINS.sepolia.chain.id).toBe(11155111);
+    expect(CCTP_CHAINS.sepolia.usdc).toBe("0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238");
+    expect(new Set(Object.values(CCTP_CHAINS).map((c) => c.domain)).size).toBe(Object.keys(CCTP_CHAINS).length);
+    expect(resumeCommand(BURN, "sepolia", "hyperevm")).toBe(`pnpm --filter @confluere/ops cctp-resume ${BURN} sepolia hyperevm`);
   });
   it("parses USDC amounts and rejects non-positive ones", () => {
     expect(usdcUnits("10.5")).toBe(10_500_000n);

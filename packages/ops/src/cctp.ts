@@ -1,10 +1,13 @@
 /**
- * Testnet USDC between HyperEVM and Monad through Circle CCTP v2 (burn, Circle attestation, mint). No web faucet,
- * no captcha: the attestation comes from Circle's public sandbox API. Verified 2026-10-12: 10 USDC HyperEVM → Monad.
+ * Testnet USDC between HyperEVM, Monad and Ethereum Sepolia through Circle CCTP v2 (burn, Circle attestation, mint).
+ * No web faucet, no captcha: the attestation comes from Circle's public sandbox API. Verified 2026-10-12: 10 USDC
+ * HyperEVM → Monad. Sepolia (domain 0) uses the same TokenMessengerV2 / MessageTransmitterV2 addresses (checked
+ * read-only 2026-10-23: identical code, localDomain() = 0); not yet exercised with a transfer. A burn on Sepolia waits
+ * for Ethereum finality (about 15 to 20 minutes) before Circle attests it.
  */
 import { createPublicClient, createWalletClient, http, pad, parseAbi, type Hex } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
-import { hyperliquidEvmTestnet, monadTestnet } from "viem/chains";
+import { hyperliquidEvmTestnet, monadTestnet, sepolia } from "viem/chains";
 
 export const CCTP = {
   tokenMessenger: "0x8FE6B999Dc680CcFDD5Bf7EB0974218be2542DAA",
@@ -15,6 +18,7 @@ export const CCTP = {
 export const CCTP_CHAINS = {
   hyperevm: { chain: hyperliquidEvmTestnet, domain: 19, usdc: "0x2B3370eE501B4a559b57D449569354196457D8Ab" },
   monad: { chain: monadTestnet, domain: 15, usdc: "0x534b2f3A21130d7a60830c2Df862319e593943A3" },
+  sepolia: { chain: sepolia, domain: 0, usdc: "0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238" },
 } as const;
 
 const abi = parseAbi([
